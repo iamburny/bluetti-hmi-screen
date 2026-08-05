@@ -59,14 +59,14 @@ static void logToSd(const PwrSample &s) {
     strncpy(g_logPath, path, sizeof(g_logPath) - 1);
     g_logPath[sizeof(g_logPath) - 1] = '\0';
     if (g_logf && isNew)
-      g_logf.println("epoch,iso,soc,dc_in,ac_in,dc_out,ac_out");
+      g_logf.println("epoch,iso,soc,dc_in,ac_in,dc_out,ac_out,temp_c");
   }
   if (!g_logf) {
     g_logPath[0] = '\0';  // open failed (card pulled?) — retry next sample
     return;
   }
-  g_logf.printf("%lu,%s,%d,%d,%d,%d,%d\n", (unsigned long)s.t, "", s.soc,
-                s.dcIn, s.acIn, s.dcOut, s.acOut);
+  g_logf.printf("%lu,%s,%d,%d,%d,%d,%d,%d\n", (unsigned long)s.t, "", s.soc,
+                s.dcIn, s.acIn, s.dcOut, s.acOut, s.tempC);
   g_logf.flush();  // persist without paying the open-seek cost each sample
 }
 
@@ -87,6 +87,7 @@ void powerlog_tick() {
   s.acIn = clamp16(power.acInW);
   s.dcOut = clamp16(power.dcOutW);
   s.acOut = clamp16(power.acOutW);
+  s.tempC = clamp16(power.tempC);
 
   pushRing(s);
   logToSd(s);
@@ -100,7 +101,7 @@ static void replaySdFile(const char *path) {
     String line = f.readStringUntil('\n');
     char *p = (char *)line.c_str();
     if (*p < '0' || *p > '9') continue;  // skip the header / blank lines
-    PwrSample s;
+    PwrSample s = {};  // zero-init: tempC defaults to 0 for pre-temp-logging rows
     s.t = strtoul(p, &p, 10);
     if (*p == ',') p++;
     while (*p && *p != ',') p++;  // skip the iso field
@@ -110,6 +111,7 @@ static void replaySdFile(const char *path) {
     s.acIn = (int16_t)strtol(p, &p, 10); if (*p == ',') p++;
     s.dcOut = (int16_t)strtol(p, &p, 10); if (*p == ',') p++;
     s.acOut = (int16_t)strtol(p, &p, 10);
+    if (*p == ',') { p++; s.tempC = (int16_t)strtol(p, &p, 10); }
     pushRing(s);
   }
   f.close();

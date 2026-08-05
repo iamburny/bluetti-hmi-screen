@@ -5,10 +5,13 @@
 // SD-card CSV log. Fed from the main loop off the published `power` struct, so
 // it never touches the timing-sensitive BLE task.
 
-struct PwrSample {                   // 12 bytes
+struct PwrSample {                   // 14 bytes
   uint32_t t;                        // uptime secs (millis()/1000 at sample time)
   int16_t soc;                       // %
   int16_t dcIn, acIn, dcOut, acOut;  // watts
+  int16_t tempC;                     // battery temp, deg C (reg 156); 0 in
+                                      // samples replayed from a pre-existing
+                                      // CSV logged before this field existed
 };
 
 // Allocate the PSRAM ring buffer and mount the SD card. Call once in setup().

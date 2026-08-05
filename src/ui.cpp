@@ -52,18 +52,16 @@ static void drawGearButton() {
 
 // ===== Layout ===============================================================
 static void layout() {
-  const int16_t W = gfx->width(), H = gfx->height();
+  const int16_t W = gfx->width();
   const int16_t margin = 12;
 
-  // Settings gear: no status bar to anchor it to anymore. Drawn as a button
-  // (50x42, matching PWR_BTN_W/PWR_BTN_H) right-aligned with the cards'
-  // right edge, vertically centered in the gap between AC IN and AC OUT.
-  // Matches powerCardRect's own geometry (m=10, card 140x80).
-  const int16_t cardM = 10, cardH = 80;
-  const int16_t gapTop = cardM + cardH, gapBot = H - cardM - cardH;
+  // Settings gear: bottom row, left of the charge-mode button (mirrors the
+  // history/release pair on the Settings page). Matches PWR_BTN_W/H/Y
+  // (50x42 @ y=270) and powerChargeBtnRect's "right of centre" math --
+  // duplicated here since those constants are declared later in the file.
   gearW = 50; gearH = 42;
-  gearX = W - cardM - gearW;
-  gearY = (gapTop + gapBot) / 2 - gearH / 2;
+  gearX = W / 2 - 6 - gearW;
+  gearY = 270;
 
   // Bluetti-settings list rows — compact pitch to fit a top utility row
   // (history/release) plus 6 rows on the 320px-tall screen (3 toggles,
@@ -93,10 +91,31 @@ static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c, uint8_t scale = 1)
 // power.gridConnected) -- see the note in power.h. The fan register is
 // still unknown (two candidates from the same sweep were both ruled out).
 static void iconPlug(int16_t cx, int16_t cy, uint16_t c) {
-  gfx->drawRoundRect(cx - 6, cy - 4, 12, 10, 2, c);
-  gfx->drawFastVLine(cx - 3, cy - 9, 5, c);
-  gfx->drawFastVLine(cx + 3, cy - 9, 5, c);
-  gfx->drawFastVLine(cx, cy + 6, 5, c);
+  gfx->drawRoundRect(cx - 9, cy - 9, 18, 17, 6, c);  // rounded body
+  gfx->fillRect(cx - 1, cy - 5, 2, 6, c);            // earth pin (top-centre)
+  gfx->fillRect(cx - 6, cy + 2, 4, 2, c);            // line pin (bottom-left)
+  gfx->fillRect(cx + 2, cy + 2, 4, 2, c);            // neutral pin (bottom-right)
+  gfx->drawFastVLine(cx - 1, cy + 9, 5, c);          // cord
+  gfx->drawFastVLine(cx + 1, cy + 9, 5, c);
+}
+
+// Scale an RGB565 colour's brightness by num/den (for the spinner trail fade
+// and the pulsing "Charging" text).
+static uint16_t dim565(uint16_t c, int num, int den) {
+  int r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
+  r = r * num / den;
+  g = g * num / den;
+  b = b * num / den;
+  return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+// Smooth 50%..100% brightness pulse, ~1.4s cycle (triangle wave -- no trig
+// needed). Used for the "Charging" status text.
+static uint16_t pulseColor(uint16_t c) {
+  uint32_t t = millis() % 1400;
+  int phase = (int)(t < 700 ? t : 1400 - t);  // 0..700..0
+  int num = 50 + (phase * 50) / 700;          // 50..100
+  return dim565(c, num, 100);
 }
 
 // Thick rounded arc gauge: a 270-degree track (open at the bottom) with the
@@ -165,12 +184,13 @@ static void iconPhone(int16_t cx, int16_t cy, uint16_t c) {
   gfx->fillCircle(cx, cy + 9, 1, c);         // home button
 }
 
-// Bottom-centre charge-mode button on the Power screen (the only one left
-// there -- history and app-release moved to the Bluetti Settings page).
+// Bottom row on the Power screen: settings gear (left, see layout()) paired
+// with the charge-mode button (right) -- history and app-release moved to
+// the Bluetti Settings page.
 static const int16_t PWR_BTN_W = 50, PWR_BTN_H = 42, PWR_BTN_Y = 270;
 static void powerChargeBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   w = PWR_BTN_W; h = PWR_BTN_H; y = PWR_BTN_Y;
-  x = gfx->width() / 2 - PWR_BTN_W / 2;  // centre
+  x = gfx->width() / 2 + 6;  // right of centre
 }
 
 // Top-of-screen utility row on the Bluetti Settings page: history (left) and
@@ -263,8 +283,9 @@ static void drawChargeModeButton() {
 
 // Power monitor: a central battery ring gauge (SoC % + remaining time) framed
 // by four corner cards — DC/AC input (top) and DC/AC output (bottom), plus
-// AC/DC output toggles. Full-height (no status bar); the settings gear sits
-// in the gap between AC IN and AC OUT. This is the home screen.
+// AC/DC output toggles. Full-height (no status bar); the grid-connected icon
+// sits in the gap between AC IN and AC OUT, and the settings gear pairs with
+// the charge-mode button on the bottom row. This is the home screen.
 static void drawPowerScreen() {
   const int16_t W = gfx->width(), H = gfx->height();
   gfx->fillScreen(COL_BG);
@@ -312,13 +333,30 @@ static void drawPowerScreen() {
   drawPowerCard(2, "DC OUT", power.dcOutW, OUT_COL, power.dcOn ? 1 : 0);
   drawPowerCard(3, "AC OUT", power.acOutW, OUT_COL, power.acOn ? 1 : 0);
 
-  // Grid-connected icon, centered in the LEFT gap (between DC IN and DC
-  // OUT) -- mirrors the gear button's position in the right gap. (A fan
-  // icon lived here briefly; pulled until the real fan register is found.)
+  // Grid-connected icon, centered in the RIGHT gap (between AC IN and AC
+  // OUT) -- the gear button lives at the bottom now instead. (A fan icon
+  // lived on the left briefly; pulled until the real fan register is found.)
   {
-    const int16_t leftCx = 10 + 140 / 2;                       // matches powerCardRect's m/w
-    const int16_t gapMidY = (10 + 80 + (H - 10 - 80)) / 2;      // matches gearY's gap math
-    iconPlug(leftCx, gapMidY, power.gridConnected ? COL_ON : COL_MUTED);
+    const int16_t rightCx = W - 10 - 140 / 2;                   // matches powerCardRect's m/w
+    const int16_t gapMidY = (10 + 80 + (H - 10 - 80)) / 2;      // matches the card-gap math
+    iconPlug(rightCx, gapMidY, power.gridConnected ? COL_ON : COL_MUTED);
+  }
+
+  // Charging / discharging / idle status, top-centre. Pulses while charging.
+  {
+    const char *stateText;
+    uint16_t stateColor;
+    if (power.charging) {
+      stateText = "Charging";
+      stateColor = pulseColor(COL_ON);
+    } else if (power.dcOutW + power.acOutW > power.dcInW + power.acInW) {
+      stateText = "Discharging";
+      stateColor = OUT_COL;
+    } else {
+      stateText = "Idle";
+      stateColor = COL_MUTED;
+    }
+    drawCenteredText(stateText, W / 2, 20, 2, stateColor);
   }
 
   // Battery-temperature warning: only shown once it crosses 32C (no
@@ -326,7 +364,7 @@ static void drawPowerScreen() {
   if (power.tempC > 32) {
     char warn[24];
     snprintf(warn, sizeof(warn), "High Temp: %d\xf8" "C", power.tempC);
-    drawCenteredText(warn, W / 2, 22, 2, COL_WARN);
+    drawCenteredText(warn, W / 2, 44, 2, COL_WARN);
   }
 
   // Centre ring gauge.
@@ -384,13 +422,16 @@ static void drawPowerScreen() {
 // Four flows overlaid: Solar (DC in), AC In, DC Out, AC Out. Legend chips double
 // as show/hide filters; 1h/6h/24h buttons pick the X span. Fed by powerlog.
 // Series 0..3 are watts (share the auto-scaled left axis); series 4 (SoC) is a
-// percentage on its own fixed 0..100 right scale (see SOC_SERIES handling).
-#define NSER 5
+// percentage on its own fixed 0..100 scale, series 5 (battery temp) a fixed
+// 0..50C scale (see SOC_SERIES/TEMP_SERIES handling).
+#define NSER 6
 #define SOC_SERIES 4
-static const uint16_t SERIES_COL[NSER] = {COL_ON, ACC_WEATHER, ACC_LIGHTS,
-                                          ACC_WATER, ACC_SETTINGS};
+#define TEMP_SERIES 5
+#define TEMP_SCALE_MAX 50
+static const uint16_t SERIES_COL[NSER] = {COL_ON,      ACC_WEATHER, ACC_LIGHTS,
+                                          ACC_WATER,   ACC_SETTINGS, COL_WARN};
 static const char *SERIES_LBL[NSER] = {"Solar", "AC In", "DC Out", "AC Out",
-                                       "SoC"};
+                                       "SoC",   "Temp"};
 static const char *CHART_WIN_LBL[3] = {"1h", "6h", "24h"};
 
 // Per-column downsample cache (one entry per plot pixel-column). Filled once per
@@ -404,6 +445,7 @@ static int seriesNow(int k) {
     case 1: return power.acInW;
     case 2: return power.dcOutW;
     case 3: return power.acOutW;
+    case TEMP_SERIES: return power.tempC;
     default: return power.soc;
   }
 }
@@ -413,11 +455,11 @@ static int chartWindowSamples() {
   return W[w];
 }
 
-// Legend chips along the bottom (also the per-series filters). Five across.
+// Legend chips along the bottom (also the per-series filters). Six across.
 static void chartLegendRect(int i, int16_t &x, int16_t &y, int16_t &w,
                             int16_t &h) {
-  w = 91; h = 52; y = 260;
-  x = 4 + i * 95;
+  w = 74; h = 52; y = 260;
+  x = 4 + i * 78;
 }
 // Window-span buttons, top-right.
 static void chartWindowRect(int i, int16_t &x, int16_t &y, int16_t &w,
@@ -438,6 +480,8 @@ static void drawChartLegend() {
     char v[10];
     if (i == SOC_SERIES)
       snprintf(v, sizeof(v), "%d%%", seriesNow(i));
+    else if (i == TEMP_SERIES)
+      snprintf(v, sizeof(v), "%d\xf8" "C", seriesNow(i));
     else
       snprintf(v, sizeof(v), "%dW", seriesNow(i));
     drawText(v, x + 20, y + 24, 2, on ? COL_TEXT : COL_MUTED);
@@ -486,6 +530,7 @@ static void drawChartScreen() {
     g_col[px][2] = s.dcOut;
     g_col[px][3] = s.acOut;
     g_col[px][4] = s.soc;
+    g_col[px][5] = s.tempC;
   }
 
   // Auto-scale watts (series 0..3) over the visible, enabled series.
@@ -534,15 +579,21 @@ static void drawChartScreen() {
     drawText(tb, lx, PY1 + 5, 1, COL_MUTED);
   }
 
-  // SoC rides its own 0..100% scale (right side); flag it so the % axis reads.
-  if (settings.chartSeriesMask & (1 << SOC_SERIES))
-    drawText("100%", PX1 - 24, PY0 - 3, 1, SERIES_COL[SOC_SERIES]);
+  // SoC and battery temp each ride their own fixed scale (right side); flag
+  // them so the axis reads. Stack the labels if both are enabled at once.
+  bool socOn = settings.chartSeriesMask & (1 << SOC_SERIES);
+  bool tempOn = settings.chartSeriesMask & (1 << TEMP_SERIES);
+  if (socOn) drawText("100%", PX1 - 24, PY0 - 3, 1, SERIES_COL[SOC_SERIES]);
+  if (tempOn)
+    drawText("50\xf8" "C", PX1 - 24, PY0 - 3 - (socOn ? 13 : 0), 1,
+             SERIES_COL[TEMP_SERIES]);  // matches TEMP_SCALE_MAX below
 
   // One polyline per visible series, downsampled to plot-width columns. Watts
-  // series use the auto-scaled yMax; SoC uses a fixed 0..100 scale.
+  // series use the auto-scaled yMax; SoC and battery temp use their own
+  // fixed scales.
   for (int k = 0; k < NSER; k++) {
     if (!(settings.chartSeriesMask & (1 << k))) continue;
-    int scale = (k == SOC_SERIES) ? 100 : yMax;
+    int scale = (k == SOC_SERIES) ? 100 : (k == TEMP_SERIES) ? TEMP_SCALE_MAX : yMax;
     uint16_t col = SERIES_COL[k];
     int16_t prevY = 0;
     bool have = false;
@@ -690,15 +741,6 @@ static void notePendingWrite() {
   g_pendingStart = millis();
 }
 
-// Scale an RGB565 colour's brightness by num/den (for the spinner trail fade).
-static uint16_t dim565(uint16_t c, int num, int den) {
-  int r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
-  r = r * num / den;
-  g = g * num / den;
-  b = b * num / den;
-  return (uint16_t)((r << 11) | (g << 5) | b);
-}
-
 // Medium centred spinner shown while a Bluetti write is being confirmed: a ring
 // of dots with a brightness trail that rotates.
 static void drawPendingSpinner() {
@@ -797,17 +839,23 @@ void ui_tick() {
 
     static PowerStatus lastPs = (PowerStatus)-1;
     static int lastSoc = -999, lastSum = -999999, lastFlags = -1, lastTtf = -1;
+    static uint32_t lastPulse = 0;
     int sum = power.dcInW + power.acInW + power.dcOutW + power.acOutW +
               power.chargeMode * 7 + power.tempC * 11;
     int flags = (power.acOn ? 1 : 0) | (power.dcOn ? 2 : 0) |
                 (power.charging ? 4 : 0) | (power.gridConnected ? 16 : 0);
-    if (power.status != lastPs || power.soc != lastSoc || sum != lastSum ||
-        flags != lastFlags || power.ttfMin != lastTtf) {
+    bool dataChanged = power.status != lastPs || power.soc != lastSoc ||
+                       sum != lastSum || flags != lastFlags || power.ttfMin != lastTtf;
+    // The "Charging" text pulses continuously, which data-driven redraws
+    // above don't refresh fast enough for -- tick it independently.
+    bool pulseTick = power.charging && millis() - lastPulse >= 100;
+    if (dataChanged || pulseTick) {
       lastPs = power.status;
       lastSoc = power.soc;
       lastSum = sum;
       lastFlags = flags;
       lastTtf = power.ttfMin;
+      if (pulseTick) lastPulse = millis();
       ui_draw();
     }
     return;

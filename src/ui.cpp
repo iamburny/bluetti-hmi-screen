@@ -96,6 +96,30 @@ static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c, uint8_t scale = 1)
 // (which the Bluetti app itself doesn't expose either). Don't wire it back
 // in without confirming what it actually is.
 
+// Cooling-fan glyph: housing ring + 3-blade hub. BEST GUESS register (reg
+// 103, power.fanOn) -- see the note in power.h. Swap with iconPlug's
+// register if this turns out to actually be the grid-connected flag.
+static void iconFan(int16_t cx, int16_t cy, uint16_t c) {
+  gfx->drawCircle(cx, cy, 10, c);
+  gfx->fillCircle(cx, cy, 2, c);
+  for (int i = 0; i < 3; i++) {
+    float a = i * (2.0f * (float)PI / 3.0f) - (float)PI / 2;
+    int16_t bx = cx + (int16_t)(cosf(a) * 7);
+    int16_t by = cy + (int16_t)(sinf(a) * 7);
+    gfx->drawLine(cx, cy, bx, by, c);
+    gfx->fillCircle(bx, by, 2, c);
+  }
+}
+
+// Mains-plug glyph: two prongs + body. BEST GUESS register (reg 161,
+// power.gridConnected) -- see the note in power.h.
+static void iconPlug(int16_t cx, int16_t cy, uint16_t c) {
+  gfx->drawRoundRect(cx - 6, cy - 4, 12, 10, 2, c);
+  gfx->drawFastVLine(cx - 3, cy - 9, 5, c);
+  gfx->drawFastVLine(cx + 3, cy - 9, 5, c);
+  gfx->drawFastVLine(cx, cy + 6, 5, c);
+}
+
 // Thick rounded arc gauge: a 270-degree track (open at the bottom) with the
 // lower `frac` portion filled. Drawn from overlapping dots so it has rounded
 // ends without needing library arc support.
@@ -308,6 +332,15 @@ static void drawPowerScreen() {
   drawPowerCard(1, "AC IN", power.acInW, IN_COL, power.acInW > 0 ? 2 : -1);
   drawPowerCard(2, "DC OUT", power.dcOutW, OUT_COL, power.dcOn ? 1 : 0);
   drawPowerCard(3, "AC OUT", power.acOutW, OUT_COL, power.acOn ? 1 : 0);
+
+  // Fan + grid status icons, stacked in the LEFT gap (between DC IN and DC
+  // OUT) -- mirrors the gear button's position in the right gap.
+  {
+    const int16_t leftCx = 10 + 140 / 2;                       // matches powerCardRect's m/w
+    const int16_t gapMidY = (10 + 80 + (H - 10 - 80)) / 2;      // matches gearY's gap math
+    iconFan(leftCx, gapMidY - 18, power.fanOn ? COL_ON : COL_MUTED);
+    iconPlug(leftCx, gapMidY + 18, power.gridConnected ? COL_ON : COL_MUTED);
+  }
 
   // Centre ring gauge.
   const int16_t cx = W / 2, cy = H / 2, rOuter = 74, thick = 12;
@@ -778,7 +811,8 @@ void ui_tick() {
     int sum = power.dcInW + power.acInW + power.dcOutW + power.acOutW +
               power.chargeMode * 7;
     int flags = (power.acOn ? 1 : 0) | (power.dcOn ? 2 : 0) |
-                (power.charging ? 4 : 0);
+                (power.charging ? 4 : 0) | (power.fanOn ? 8 : 0) |
+                (power.gridConnected ? 16 : 0);
     if (power.status != lastPs || power.soc != lastSoc || sum != lastSum ||
         flags != lastFlags || power.ttfMin != lastTtf) {
       lastPs = power.status;

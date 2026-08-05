@@ -29,6 +29,13 @@ struct PowerData {
   bool charging; // true when net charging
   bool acOn;     // AC output enabled (reg 2011)
   bool dcOn;     // DC output enabled (reg 2012)
+  // BEST GUESS, unconfirmed by the vendor/community -- found by diffing a
+  // register sweep idle vs. AC-charging (fan running); two candidates changed
+  // together (a clean 0/1 flip and a 0/2 jump) and this is our pick between
+  // them pending real-world confirmation. See docs/BLUETTI.md "Cooling fan /
+  // grid-connected" section. Swap the two register numbers below if wrong.
+  bool fanOn;          // cooling fan running (reg 103)
+  bool gridConnected;  // AC/mains input detected, even before current flows (reg 161)
   uint32_t fetchedMs;  // millis() of last good reading
 };
 

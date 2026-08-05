@@ -291,6 +291,8 @@ static bool poll() {
   if (readRegs(2083, 1, w, 1) == 1) tmp.chargeLimit = w[0] >> 8;  // % in hi byte
   if (readRegs(2067, 1, w, 1) == 1) tmp.screenTimeout = w[0];
   if (readRegs(1500, 1, w, 1) == 1) tmp.acOutFreqDHz = w[0];
+  if (readRegs(103, 1, w, 1) == 1) tmp.fanOn = (w[0] != 0);         // best guess, see power.h
+  if (readRegs(161, 1, w, 1) == 1) tmp.gridConnected = (w[0] != 0); // best guess, see power.h
   tmp.charging = (tmp.dcInW + tmp.acInW) > (tmp.dcOutW + tmp.acOutW);
   tmp.whRemaining = 0;
   tmp.fetchedMs = millis();

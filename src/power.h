@@ -39,9 +39,14 @@ struct PowerData {
   // docs/BLUETTI.md "Cooling fan / grid-connected".
   bool gridConnected;  // AC/mains input detected, even before current flows (reg 161 & 2)
   // Signed net battery power, W. Negative = charging into the battery,
-  // positive = discharging. Two's complement on the wire. Confirmed against
-  // three states: -791 @ 811W in, +485 @ 489W out, -798 @ 807W net in.
-  int netBatteryW;     // reg 148
+  // positive = discharging. Confirmed against three states: -791 @ 811W in,
+  // +485 @ 489W out, -798 @ 807W net in.
+  //
+  // Regs 148/149 are really one signed 32-bit value (148 = low word, 149 =
+  // high word doing sign extension: 0 when positive, 0xFFFF when negative).
+  // Reading 148 alone as int16_t is correct and sufficient regardless -- a
+  // 2400 W unit can't approach the +/-32767 W that would overflow it.
+  int netBatteryW;     // reg 148 (low word of the 148/149 pair)
   uint32_t fetchedMs;  // millis() of last good reading
 };
 

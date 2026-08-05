@@ -264,8 +264,11 @@ static bool diagIsNoisy(uint16_t a) {
     case 100: case 101: case 102: case 104: case 105:
     case 140: case 141: case 142: case 143: case 144:
     case 145: case 146: case 147: case 148:
+    case 149:  // high word of the 148/149 signed 32-bit pair: flips
+               // 0 <-> 65535 (sign extension) on every direction change
     case 167: case 188:
     case 1301: case 1313: case 1314: case 1315:
+    case 1400:  // DC output W (the x10-address mirror of reg 140)
     case 1420: case 1430: case 1431: case 1432:
     case 1500: case 1509: case 1510: case 1511: case 1512:
     case 2003:

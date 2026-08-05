@@ -221,11 +221,23 @@ earlier wrong call that reg 103 was the mains flag**:
   `gridConnected` as `reg103 != 0`, which falsely lit the mains icon whenever
   the inverter ran on battery alone. Effectively duplicates the `charging`
   flag we already derive from wattages.
-- **Reg 148 = signed net battery power, W** (`power.netBatteryW`), two's
-  complement — negative = charging into the battery, positive = discharging.
-  Verified across three states: −791 @ 811 W in, +485 @ 489 W out, −798 @
-  807 W net in. (Previously dismissed as an unused −1 sentinel because it
-  reads 65535 at idle.)
+- **Regs 148/149 = signed net battery power, W, as one 32-bit value**
+  (`power.netBatteryW`) — negative = charging into the battery, positive =
+  discharging. 148 is the low word, 149 the high word doing sign extension
+  (0 when positive, 0xFFFF when negative), which is why 149 looks like it
+  "toggles 0 ↔ 65535" — it's tracking the direction change, not a flag:
+
+  | State | 148 | 149 | signed 32-bit | actual |
+  |---|---|---|---|---|
+  | Idle | 0 | 0 | 0 | 0 |
+  | Discharging | 485 | 0 | +485 | 489 W out |
+  | Charging | 64738 | 65535 | −798 | 807 W net in |
+
+  **Reading 148 alone as `int16_t` is correct and sufficient** — a 2400 W unit
+  can't approach the ±32767 W needed to overflow it. (Both were previously
+  dismissed as unused −1 sentinels because they read 65535 in some states.)
+- **Reg 1400 = DC output W** — the ×10-address mirror of reg 140, same as
+  `142→1420`. Nothing reads it; we already use 140.
 - **Reg 124** tracks AC output active (0 while charging-only, 2 whenever the
   inverter runs) — redundant with reg 161 bit0, so nothing reads it.
 

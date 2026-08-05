@@ -28,6 +28,7 @@ to just the Bluetti functionality.
 
 - Guition JC3248W535EN — ESP32-S3 (16MB flash, 8MB OPI PSRAM), 320×480 IPS
   LCD over QSPI (AXS15231B driver), I2C capacitive touch.
+  [Source on AliExpress](https://www.aliexpress.com/item/1005007566332450.html)
 - Power source: Bluetti Elite 300 (BLE).
 
 Full pin map is in [`CLAUDE.md`](CLAUDE.md).

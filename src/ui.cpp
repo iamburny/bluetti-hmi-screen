@@ -567,7 +567,7 @@ static void drawSettingRow(int16_t x, int16_t y, int16_t w, int16_t h,
 }
 
 // Shared compact row geometry for the Bluetti settings page.
-static int16_t srowY(int i) { return nameRowY + i * (nameRowH + 8); }
+static int16_t srowY(int i) { return nameRowY + i * (nameRowH + 6); }
 
 // One tappable toggle row (label left, ON/OFF pill right) for the Bluetti page.
 static void drawBtToggleRow(int i, const char *label, bool on) {
@@ -650,14 +650,15 @@ static void drawBtSettings() {
   drawBtValueRow(4, "Screen Timeout", btTimeoutLabel(power.screenTimeout));
   drawSettingRow(nameRowX, srowY(5), nameRowW, nameRowH, "Pairing (BLE MAC)",
                  strlen(settings.bluettiMac) ? settings.bluettiMac : "Auto");
-  // AC output voltage + frequency (compact line at the very bottom).
+  // AC output voltage + frequency, with a clear gap below the last row so it
+  // doesn't crowd the Pairing row above it.
   char ac[40];
   if (power.acOn && power.acOutDV > 0)
     snprintf(ac, sizeof(ac), "AC out:  %d.%d V    %d.%d Hz", power.acOutDV / 10,
              power.acOutDV % 10, power.acOutFreqDHz / 10, power.acOutFreqDHz % 10);
   else
     snprintf(ac, sizeof(ac), "AC output off");
-  drawCenteredText(ac, W / 2, H - 9, 1, COL_MUTED);
+  drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1, COL_MUTED);
 }
 
 // ===== Public ===============================================================

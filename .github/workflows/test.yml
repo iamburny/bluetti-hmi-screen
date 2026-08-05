@@ -1,0 +1,21 @@
+name: unit-tests
+
+# Runs the host-side (native) unit tests for the pure logic on every push/PR.
+# gcc is preinstalled on the GitHub runner, so no local toolchain is needed.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+      - name: Run native unit tests
+        run: pio test -e native

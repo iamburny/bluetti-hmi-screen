@@ -397,11 +397,18 @@ static void drawPowerScreen() {
   // left it floating up near the ring stroke instead of reading as a suffix.
   drawText("%", x0 + numW + gap, numTop + (numH - pctH) / 2, 2, ringCol);
 
-  // NOTE: a "net battery power" figure briefly lived here, fed by reg 148.
-  // Removed -- reg 148 turned out to ignore DC output entirely (an 18 W USB
-  // load left it at -1), so it's signed AC power, not net battery flow. See
-  // docs/BLUETTI.md. Deriving a true net figure would mean summing the four
-  // card values ourselves; the device doesn't appear to publish one.
+  // Net battery flow, DERIVED from the four card values rather than read from
+  // a register: the device doesn't publish a true net figure (reg 148 looked
+  // like one but only tracks AC -- see docs/BLUETTI.md). Sign is the intuitive
+  // way round for a battery, opposite to reg 148's: positive = gaining.
+  // Always shown, muted at zero, so a blank never reads as "broken".
+  {
+    int net = (power.dcInW + power.acInW) - (power.dcOutW + power.acOutW);
+    char nb[16];
+    snprintf(nb, sizeof(nb), "%+d W", net);
+    drawCenteredText(net == 0 ? "0 W" : nb, cx, cy + 36, 1,
+                     net > 0 ? COL_ON : net < 0 ? OUT_COL : COL_MUTED);
+  }
 
   // Remaining time (device estimate, reg 104) below the gauge — green when
   // charging, white when discharging.

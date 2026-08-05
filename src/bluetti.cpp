@@ -141,9 +141,16 @@ static bool connectAndHandshake() {
     if (!waitFrame(f, 800)) continue;
     std::vector<uint8_t> reply, plain;
     int r = g_crypt.handle(f.data, f.len, reply, plain);
-    if (r == 1)
-      g_wr->writeValue(reply.data(), reply.size(), true);
-    else if (r == 2)
+    if (r == 1) {
+      // A write can legitimately fail mid-handshake if the peripheral drops
+      // the link (common with battery-powered stations disconnecting
+      // between polls). Bail out now instead of sitting through the rest of
+      // the 12s window waiting on a reply to a message that was never sent.
+      if (!g_wr->writeValue(reply.data(), reply.size(), true)) {
+        BDBG("[bluetti] handshake write failed (link dropped?)\n");
+        break;
+      }
+    } else if (r == 2)
       break;
     else if (r < 0)
       break;

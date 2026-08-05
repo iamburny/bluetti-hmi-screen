@@ -246,11 +246,26 @@ full campaigns came up empty: (1) idle-vs-charging over the config/status
 blocks, (2) all **940** readable registers swept repeatedly during a steady
 500 W load and again during heavy charging + load, spanning moments the fan
 audibly started. Every single change was analogue drift (watts/volts) or a
-monotonic counter — no boolean or small-int flip anywhere. Either the fan
-state isn't exposed over Modbus at all, or it lives outside every readable
-window. Next avenue if anyone retries: a live on-screen register view (so
-the thermally-triggered start can be caught in the instant it happens rather
-than hoping a capture window straddles it), not more blind sweeping.
+monotonic counter — no boolean or small-int flip anywhere. A third campaign
+using the live Diagnostics change-detector page (long-press the gear) also
+found nothing when the fan started.
+
+**Conclusion: internal hardware/actuator states appear not to be on the
+Modbus map at all.** The corroborating evidence is that the Bluetti's own
+front screen switching off after its 30 s timeout *also* changes no register
+— even though the timeout **setting** is exposed and writable at reg 2067.
+The device consistently exposes three things and no more:
+
+| Category | Exposed? |
+|---|---|
+| Configuration (ECO, charge limit/mode, screen timeout, pairing) | yes, read + write |
+| Aggregate measurements (watts, volts, amps, SoC, temperature) | yes |
+| Derived state (net direction reg 103, AC in/out bitmask reg 161) | yes |
+| **Internal actuator state (fan, screen backlight, per-socket/port)** | **none found** |
+
+Treat the fan as unavailable unless someone turns up vendor documentation or
+a different function code. Don't spend more time sweeping for it — three
+campaigns and the screen-state result all point the same way.
 
 **Correction to the wide-sweep notes above: `700–759` is NOT all-zero.**
 Found populated: `701`=2, `702`=32177, `703`=1526, `704`=61, `705`=256,

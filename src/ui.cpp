@@ -213,6 +213,29 @@ static void btReleaseBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   x = gfx->width() / 2 + 6;  // right of centre
 }
 
+// Back button, top-left of the sub-pages. Swipe-back still works, but tap
+// actions on those pages fire on touch-DOWN, so a swipe starting over a
+// settings row toggled it (or reset the Diagnostics counters) before the
+// swipe was ever recognised. An explicit button avoids the whole problem.
+static void backBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+  w = 46; h = 28; x = 8; y = 8;
+}
+static void iconBack(int16_t cx, int16_t cy, uint16_t c) {
+  // Left-pointing chevron + shaft.
+  gfx->drawLine(cx - 5, cy, cx + 2, cy - 7, c);
+  gfx->drawLine(cx - 4, cy, cx + 3, cy - 7, c);
+  gfx->drawLine(cx - 5, cy, cx + 2, cy + 7, c);
+  gfx->drawLine(cx - 4, cy, cx + 3, cy + 7, c);
+  gfx->drawFastHLine(cx - 5, cy, 12, c);
+}
+static void drawBackButton() {
+  int16_t x, y, w, h;
+  backBtnRect(x, y, w, h);
+  gfx->fillRoundRect(x, y, w, h, 6, COL_TILE);
+  gfx->drawRoundRect(x, y, w, h, 6, COL_MUTED);
+  iconBack(x + w / 2, y + h / 2, COL_TEXT);
+}
+
 // Mini bar-chart glyph for the history button.
 static void iconChart(int16_t cx, int16_t cy, uint16_t c) {
   const int16_t bl = cy + 9;  // baseline
@@ -522,7 +545,8 @@ static void drawChartScreen() {
   static uint32_t lastMs = 0;
   const int16_t W = gfx->width();
   gfx->fillScreen(COL_BG);
-  drawText("Power History", 8, 10, 2, COL_TEXT);
+  drawBackButton();
+  drawText("Power History", 62, 14, 2, COL_TEXT);  // clear of the back button
 
   // Window-span selector (top-right).
   for (int i = 0; i < 3; i++) {
@@ -716,8 +740,10 @@ static void drawBtSettings() {
   const int16_t W = gfx->width();
   gfx->fillScreen(COL_BG);
 
-  // History + app-release: available regardless of connection state, so
-  // drawn (and handled, in ui_handle_touch) before the power_valid() gate.
+  // Back, plus history + app-release. All available regardless of connection
+  // state, so drawn (and handled, in ui_handle_touch) before the
+  // power_valid() gate below.
+  drawBackButton();
   drawChartButton();
   drawReleaseButton((int)bluetti_release_remaining());
 
@@ -788,7 +814,8 @@ static void drawDiagnostics() {
   const int16_t W = gfx->width(), H = gfx->height();
   const BluettiStats &st = bluetti_stats();
   gfx->fillScreen(COL_BG);
-  drawText("DIAGNOSTICS", 8, 8, 1, COL_MUTED);
+  drawBackButton();
+  drawText("DIAGNOSTICS", 62, 14, 1, COL_MUTED);  // clear of the back button
 
   // --- Poll interval stepper -------------------------------------------------
   drawText("Poll interval", 8, 38, 1, COL_TEXT);
@@ -1152,8 +1179,18 @@ void ui_handle_touch(int16_t x, int16_t y) {
     return;
   }
 
-  // Power history chart: legend chips toggle each series, window buttons set span.
+  // Power history chart: back, legend chips toggle each series, window buttons
+  // set span.
   if (current == POWER_CHART) {
+    {
+      int16_t bx, by, bw, bh;
+      backBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        current = POWER;
+        ui_draw();
+        return;
+      }
+    }
     for (int i = 0; i < NSER; i++) {
       int16_t bx, by, bw, bh;
       chartLegendRect(i, bx, by, bw, bh);
@@ -1180,9 +1217,15 @@ void ui_handle_touch(int16_t x, int16_t y) {
   // Bluetti settings sub-page: history/release utility row, toggles,
   // charge-limit stepper, timeout cycle.
   if (current == BT_SETTINGS) {
-    // History + app-release: available regardless of connection state.
+    // Back, history, app-release: available regardless of connection state.
     {
       int16_t bx, by, bw, bh;
+      backBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        current = POWER;
+        ui_draw();
+        return;
+      }
       btChartBtnRect(bx, by, bw, bh);
       if (inRect(x, y, bx, by, bw, bh)) {
         current = POWER_CHART;
@@ -1245,8 +1288,20 @@ void ui_handle_touch(int16_t x, int16_t y) {
     return;
   }
 
-  // Diagnostics: poll-interval steppers, sweep toggle, else reset counters.
+  // Diagnostics: back, poll-interval steppers, sweep toggle, else reset
+  // counters. Back must be tested FIRST -- the catch-all below would
+  // otherwise swallow it and just reset the counters.
   if (current == DIAGNOSTICS) {
+    {
+      int16_t bx, by, bw, bh;
+      backBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        bluetti_diag_enable(false);  // stop the slow sweep on the way out
+        current = POWER;
+        ui_draw();
+        return;
+      }
+    }
     // Poll interval -- steps chosen to bracket the ~2s poll duration so the
     // saturation point is easy to walk up to and back off from.
     static const uint16_t STEPS[] = {250,  500,  750,  1000, 1500,

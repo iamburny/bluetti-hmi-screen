@@ -31,11 +31,17 @@ struct PowerData {
   bool charging; // true when net charging
   bool acOn;     // AC output enabled (reg 2011)
   bool dcOn;     // DC output enabled (reg 2012)
-  // Confirmed live (2026-08-05): lit immediately when AC charging started,
-  // well before the fan audibly kicked in -- see docs/BLUETTI.md "Cooling
-  // fan / grid-connected". The other candidate from that sweep (reg 161)
-  // was ruled out as the fan too; the real fan register is still unknown.
-  bool gridConnected;  // AC/mains input detected, even before current flows (reg 103)
+  // Reg 161 is a bitmask: bit1 (2) = AC input present, bit0 (1) = AC output
+  // active. Confirmed across all four states -- idle 0, charging 2, load 1,
+  // charging+load 3. (Reg 103 was used for this at first and is wrong: it's
+  // a net-direction enum, 0=idle/1=charging/2=discharging, so it also read
+  // non-zero on load-only and falsely lit the mains icon.) See
+  // docs/BLUETTI.md "Cooling fan / grid-connected".
+  bool gridConnected;  // AC/mains input detected, even before current flows (reg 161 & 2)
+  // Signed net battery power, W. Negative = charging into the battery,
+  // positive = discharging. Two's complement on the wire. Confirmed against
+  // three states: -791 @ 811W in, +485 @ 489W out, -798 @ 807W net in.
+  int netBatteryW;     // reg 148
   uint32_t fetchedMs;  // millis() of last good reading
 };
 

@@ -201,19 +201,58 @@ while AC-charging with the fan audibly running, and diffed. Two clean
 small-integer flips stood out from the noise (SoC, time-remaining, AC input
 power all moved too, as expected): reg 103 (0→1) and reg 161 (0→2).
 
-**Reg 103 = grid/mains-connected — CONFIRMED live** (`power.gridConnected`).
-On a second real-world test it lit up the instant AC charging started, well
-before the fan kicked in, matching the device's own "grid" icon behaviour
-exactly (relay clicks and current starts flowing *after* the icon lights).
+A later four-state test (idle / charging only / AC-load only / charging +
+load simultaneously) pinned both registers down properly, and **corrected an
+earlier wrong call that reg 103 was the mains flag**:
 
-**The fan register is still unknown.** Reg 161 was the other candidate but
-was ruled out on the same test — it didn't correlate with the fan actually
-starting. Wiring an icon to it would just be guessing again, so nothing
-currently reads reg 161. Whoever picks this up next: the fan is thermally
-triggered (not simply tied to charging), so the discovery method needs a
-sweep taken specifically at the *moment the fan noise starts*, ideally with
-charging already stable beforehand (see reg 156 below, which behaves like a
-plausible temperature — likely the trigger the fan actually watches).
+| State | AC in W | AC out W | reg 103 | reg 161 | reg 124 |
+|---|---|---|---|---|---|
+| Idle | 0 | 0 | 0 | 0 | 0 |
+| Charging only | 811 | 0 | 1 | 2 | 0 |
+| AC load only | 0 | 489 | 2 | 1 | 2 |
+| Charging + load | 1339 | 532 | 1 | **3** | 2 |
+
+- **Reg 161 = AC bitmask — this is the mains/grid flag** (`power.gridConnected
+  = reg161 & 2`). bit1 (2) = AC **input** present, bit0 (1) = AC **output**
+  active. Fits all four states, including 3 when both are running.
+- **Reg 103 = net power-flow direction**, NOT a mains flag: 0 = idle, 1 = net
+  charging, 2 = net discharging (it stayed 1 in the combined state, where
+  input exceeded output, so it is not a bitmask). It was briefly wired to
+  `gridConnected` as `reg103 != 0`, which falsely lit the mains icon whenever
+  the inverter ran on battery alone. Effectively duplicates the `charging`
+  flag we already derive from wattages.
+- **Reg 148 = signed net battery power, W** (`power.netBatteryW`), two's
+  complement — negative = charging into the battery, positive = discharging.
+  Verified across three states: −791 @ 811 W in, +485 @ 489 W out, −798 @
+  807 W net in. (Previously dismissed as an unused −1 sentinel because it
+  reads 65535 at idle.)
+- **Reg 124** tracks AC output active (0 while charging-only, 2 whenever the
+  inverter runs) — redundant with reg 161 bit0, so nothing reads it.
+
+**The fan register was NOT found, and the sweep approach is exhausted.** Two
+full campaigns came up empty: (1) idle-vs-charging over the config/status
+blocks, (2) all **940** readable registers swept repeatedly during a steady
+500 W load and again during heavy charging + load, spanning moments the fan
+audibly started. Every single change was analogue drift (watts/volts) or a
+monotonic counter — no boolean or small-int flip anywhere. Either the fan
+state isn't exposed over Modbus at all, or it lives outside every readable
+window. Next avenue if anyone retries: a live on-screen register view (so
+the thermally-triggered start can be caught in the instant it happens rather
+than hoping a capture window straddles it), not more blind sweeping.
+
+**Correction to the wide-sweep notes above: `700–759` is NOT all-zero.**
+Found populated: `701`=2, `702`=32177, `703`=1526, `704`=61, `705`=256,
+`721`=1, `722`=513, `723`=25600. None of them flipped with fan/load/charge
+state, so they're unidentified but not the fan. The other blocks previously
+recorded as all-zero (`2400–2449`, `2500–2539`, `3000–3029`, `3500–3549`,
+`3600–3659`) were re-confirmed genuinely all-zero.
+
+**No per-socket telemetry exists for the AC outputs.** A 500 W load produced
+one aggregate figure mirrored across `142` / `1420` / `1430` / `1510`
+(~488 W), with current at `1432` / `1512` and voltage at `1431` / `1511` —
+nothing distinguishing UK socket 1 from socket 2. Unsurprising, since both
+sockets sit behind the same inverter. Don't go looking for per-socket
+breakdown; it isn't there.
 
 **Reg 156 = battery temperature — wired in as `power.tempC`** (replacing the
 abandoned reg 152, which only ever crept upward — see the note above). Only

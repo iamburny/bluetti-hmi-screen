@@ -291,7 +291,10 @@ static bool poll() {
   if (readRegs(2083, 1, w, 1) == 1) tmp.chargeLimit = w[0] >> 8;  // % in hi byte
   if (readRegs(2067, 1, w, 1) == 1) tmp.screenTimeout = w[0];
   if (readRegs(1500, 1, w, 1) == 1) tmp.acOutFreqDHz = w[0];
-  if (readRegs(103, 1, w, 1) == 1) tmp.gridConnected = (w[0] != 0); // confirmed, see power.h
+  // reg 161 bit1 = AC input present (bit0 = AC output active). See power.h.
+  if (readRegs(161, 1, w, 1) == 1) tmp.gridConnected = (w[0] & 0x02) != 0;
+  // reg 148 is signed (two's complement): negative = charging. See power.h.
+  if (readRegs(148, 1, w, 1) == 1) tmp.netBatteryW = (int16_t)w[0];
   tmp.charging = (tmp.dcInW + tmp.acInW) > (tmp.dcOutW + tmp.acOutW);
   tmp.whRemaining = 0;
   tmp.fetchedMs = millis();

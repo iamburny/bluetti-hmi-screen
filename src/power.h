@@ -16,7 +16,9 @@ struct PowerData {
   int acOutW;    // AC output (inverter loads), watts
   int whRemaining;  // remaining energy, watt-hours (0 = unknown)
   int ttfMin;    // minutes to empty (discharging) or full (charging); <=0 = n/a
-  int tempC;     // battery temperature, deg C (reg 152)
+  int tempC;     // battery temperature, deg C (reg 156 -- see docs/BLUETTI.md;
+                 // reg 152 was tried first but only ever creeps upward, never
+                 // reflecting a live reading -- don't go back to it)
   int acOutDV;   // AC output voltage, deci-volts (reg 1431; /10 = volts)
   int chargeMode;  // 0=Standard, 1=Silent, 2=Turbo, 4=Custom (reg 2020)
   int gridChargeA; // Custom max grid charging current, A (reg 2214)
@@ -29,13 +31,11 @@ struct PowerData {
   bool charging; // true when net charging
   bool acOn;     // AC output enabled (reg 2011)
   bool dcOn;     // DC output enabled (reg 2012)
-  // BEST GUESS, unconfirmed by the vendor/community -- found by diffing a
-  // register sweep idle vs. AC-charging (fan running); two candidates changed
-  // together (a clean 0/1 flip and a 0/2 jump) and this is our pick between
-  // them pending real-world confirmation. See docs/BLUETTI.md "Cooling fan /
-  // grid-connected" section. Swap the two register numbers below if wrong.
-  bool fanOn;          // cooling fan running (reg 103)
-  bool gridConnected;  // AC/mains input detected, even before current flows (reg 161)
+  // Confirmed live (2026-08-05): lit immediately when AC charging started,
+  // well before the fan audibly kicked in -- see docs/BLUETTI.md "Cooling
+  // fan / grid-connected". The other candidate from that sweep (reg 161)
+  // was ruled out as the fan too; the real fan register is still unknown.
+  bool gridConnected;  // AC/mains input detected, even before current flows (reg 103)
   uint32_t fetchedMs;  // millis() of last good reading
 };
 

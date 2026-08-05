@@ -89,30 +89,9 @@ static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c, uint8_t scale = 1)
   gfx->drawLine(cx - w, cy + q, cx + w, cy - q, c); // cross stroke
 }
 
-// NOTE: reg 152 (power.tempC) is intentionally not shown anywhere in the UI.
-// It reads a plausible value at first use but only ever creeps upward over
-// weeks, never dipping even overnight — behaviour consistent with a
-// BMS-internal peak/record-high stat, not the live battery temperature
-// (which the Bluetti app itself doesn't expose either). Don't wire it back
-// in without confirming what it actually is.
-
-// Cooling-fan glyph: housing ring + 3-blade hub. BEST GUESS register (reg
-// 103, power.fanOn) -- see the note in power.h. Swap with iconPlug's
-// register if this turns out to actually be the grid-connected flag.
-static void iconFan(int16_t cx, int16_t cy, uint16_t c) {
-  gfx->drawCircle(cx, cy, 10, c);
-  gfx->fillCircle(cx, cy, 2, c);
-  for (int i = 0; i < 3; i++) {
-    float a = i * (2.0f * (float)PI / 3.0f) - (float)PI / 2;
-    int16_t bx = cx + (int16_t)(cosf(a) * 7);
-    int16_t by = cy + (int16_t)(sinf(a) * 7);
-    gfx->drawLine(cx, cy, bx, by, c);
-    gfx->fillCircle(bx, by, 2, c);
-  }
-}
-
-// Mains-plug glyph: two prongs + body. BEST GUESS register (reg 161,
-// power.gridConnected) -- see the note in power.h.
+// Mains-plug glyph: two prongs + body. Confirmed register (reg 103,
+// power.gridConnected) -- see the note in power.h. The fan register is
+// still unknown (two candidates from the same sweep were both ruled out).
 static void iconPlug(int16_t cx, int16_t cy, uint16_t c) {
   gfx->drawRoundRect(cx - 6, cy - 4, 12, 10, 2, c);
   gfx->drawFastVLine(cx - 3, cy - 9, 5, c);
@@ -333,13 +312,21 @@ static void drawPowerScreen() {
   drawPowerCard(2, "DC OUT", power.dcOutW, OUT_COL, power.dcOn ? 1 : 0);
   drawPowerCard(3, "AC OUT", power.acOutW, OUT_COL, power.acOn ? 1 : 0);
 
-  // Fan + grid status icons, stacked in the LEFT gap (between DC IN and DC
-  // OUT) -- mirrors the gear button's position in the right gap.
+  // Grid-connected icon, centered in the LEFT gap (between DC IN and DC
+  // OUT) -- mirrors the gear button's position in the right gap. (A fan
+  // icon lived here briefly; pulled until the real fan register is found.)
   {
     const int16_t leftCx = 10 + 140 / 2;                       // matches powerCardRect's m/w
     const int16_t gapMidY = (10 + 80 + (H - 10 - 80)) / 2;      // matches gearY's gap math
-    iconFan(leftCx, gapMidY - 18, power.fanOn ? COL_ON : COL_MUTED);
-    iconPlug(leftCx, gapMidY + 18, power.gridConnected ? COL_ON : COL_MUTED);
+    iconPlug(leftCx, gapMidY, power.gridConnected ? COL_ON : COL_MUTED);
+  }
+
+  // Battery-temperature warning: only shown once it crosses 32C (no
+  // permanent footprint otherwise). Reg 156 -- see power.h/BLUETTI.md.
+  if (power.tempC > 32) {
+    char warn[24];
+    snprintf(warn, sizeof(warn), "High Temp: %d\xf8" "C", power.tempC);
+    drawCenteredText(warn, W / 2, 22, 2, COL_WARN);
   }
 
   // Centre ring gauge.
@@ -675,15 +662,17 @@ static void drawBtSettings() {
   // full editing; the row itself just shows Auto/Custom, matching the
   // short-status-word style of the other value rows.
   drawBtValueRow(5, "Pairing", strlen(settings.bluettiMac) ? "Custom" : "Auto");
-  // AC output voltage + frequency, with a clear gap below the last row so it
-  // doesn't crowd the Pairing row above it.
-  char ac[40];
+  // Battery temp (reg 156) + AC output voltage/frequency, with a clear gap
+  // below the last row so it doesn't crowd the Pairing row above it.
+  char ac[56];
   if (power.acOn && power.acOutDV > 0)
-    snprintf(ac, sizeof(ac), "AC out:  %d.%d V    %d.%d Hz", power.acOutDV / 10,
-             power.acOutDV % 10, power.acOutFreqDHz / 10, power.acOutFreqDHz % 10);
+    snprintf(ac, sizeof(ac), "Battery %d\xf8" "C    AC out: %d.%d V  %d.%d Hz",
+             power.tempC, power.acOutDV / 10, power.acOutDV % 10,
+             power.acOutFreqDHz / 10, power.acOutFreqDHz % 10);
   else
-    snprintf(ac, sizeof(ac), "AC output off");
-  drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1, COL_MUTED);
+    snprintf(ac, sizeof(ac), "Battery %d\xf8" "C    AC output off", power.tempC);
+  drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1,
+                   power.tempC > 32 ? COL_WARN : COL_MUTED);
 }
 
 // ===== Public ===============================================================
@@ -809,10 +798,9 @@ void ui_tick() {
     static PowerStatus lastPs = (PowerStatus)-1;
     static int lastSoc = -999, lastSum = -999999, lastFlags = -1, lastTtf = -1;
     int sum = power.dcInW + power.acInW + power.dcOutW + power.acOutW +
-              power.chargeMode * 7;
+              power.chargeMode * 7 + power.tempC * 11;
     int flags = (power.acOn ? 1 : 0) | (power.dcOn ? 2 : 0) |
-                (power.charging ? 4 : 0) | (power.fanOn ? 8 : 0) |
-                (power.gridConnected ? 16 : 0);
+                (power.charging ? 4 : 0) | (power.gridConnected ? 16 : 0);
     if (power.status != lastPs || power.soc != lastSoc || sum != lastSum ||
         flags != lastFlags || power.ttfMin != lastTtf) {
       lastPs = power.status;
@@ -845,7 +833,7 @@ void ui_tick() {
             (power.powerLift ? 4 : 0) | (power.chargeLimit << 3) |
             (power.screenTimeout << 10);
     int b2 = (power.acOn ? 1 : 0) | (power.acOutDV << 1) |
-             (power.acOutFreqDHz << 14);  // AC info line
+             (power.acOutFreqDHz << 14) | (power.tempC << 24);  // AC info line + battery temp
     if (b != lastBt || b2 != lastBt2 || pv != lastValid) {
       lastBt = b;
       lastBt2 = b2;

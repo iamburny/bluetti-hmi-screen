@@ -192,33 +192,43 @@ input V / I. The 1213/1214 pair is the most likely home for the still-unmapped
 Notably the lib does **not** know the Elite's screen-timeout register (commented
 `# Display timeout (?)`) — we found it (2067).
 
-## Cooling fan / grid-connected — best guess, unconfirmed (2026-08-05)
+## Cooling fan / grid-connected (2026-08-05)
 
 Wanted to mirror two icons the Bluetti's own screen shows (fan running, grid/
 mains detected). Method: swept the known-readable config/status blocks
 (`100–199`, `2000–2089`, `2200–2279`, block reads of 10) once idle, again
 while AC-charging with the fan audibly running, and diffed. Two clean
 small-integer flips stood out from the noise (SoC, time-remaining, AC input
-power all moved too, as expected):
+power all moved too, as expected): reg 103 (0→1) and reg 161 (0→2).
 
-| Reg | Idle | Charging + fan on | Assigned to |
-|---|---|---|---|
-| **103** | 0 | 1 | `power.fanOn` — clean 0/1 boolean, picked as the fan (simple sensor-driven flags tend to be plain on/off) |
-| **161** | 0 | 2 | `power.gridConnected` — jumps by 2 rather than 1, read as a multi-state input-detect enum (0=absent, wasn't able to catch a "1" state, 2=detected+drawing) rather than a simple toggle, picked as grid/mains |
+**Reg 103 = grid/mains-connected — CONFIRMED live** (`power.gridConnected`).
+On a second real-world test it lit up the instant AC charging started, well
+before the fan kicked in, matching the device's own "grid" icon behaviour
+exactly (relay clicks and current starts flowing *after* the icon lights).
 
-**This has NOT been independently verified** — both registers changed
-together in the same window (charging started and the fan came on close
-together), so the diff alone can't prove which is which. If the two icons
-are backwards on the actual hardware, swap the register numbers in
-`power.h`/`bluetti.cpp` (search `fanOn`/`gridConnected`) and here.
+**The fan register is still unknown.** Reg 161 was the other candidate but
+was ruled out on the same test — it didn't correlate with the fan actually
+starting. Wiring an icon to it would just be guessing again, so nothing
+currently reads reg 161. Whoever picks this up next: the fan is thermally
+triggered (not simply tied to charging), so the discovery method needs a
+sweep taken specifically at the *moment the fan noise starts*, ideally with
+charging already stable beforehand (see reg 156 below, which behaves like a
+plausible temperature — likely the trigger the fan actually watches).
+
+**Reg 156 = battery temperature — wired in as `power.tempC`** (replacing the
+abandoned reg 152, which only ever crept upward — see the note above). Only
+one data point so far (24°C idle → 25°C under load), but that's a live,
+plausible, small delta unlike reg 152's one-way creep. Shown on the Bluetti
+Settings page's bottom info line, and the Power screen shows a "High Temp"
+warning above the gauge once it exceeds 32°C. Needs more observation before
+fully trusting it as the true live reading.
 
 Other registers that changed in the same diff, for reference (not wired to
 anything): `100` 1000→1013 (drifts even at idle, looks like a counter), `101`
-2→732 (large jump, maybe a duration/energy accumulator), `156` 24→25
-(temperature-like, +1 under load), `188` 0→209 (unclear), `2003` 4916→5915
-(the already-unidentified pack/cell register, +999), `148` 65535→64745 (the
-already-known unused/−1 sentinel register, now reading roughly −791 signed —
-plausibly a net power-flow value, unconfirmed).
+2→732 (large jump, maybe a duration/energy accumulator), `188` 0→209
+(unclear), `2003` 4916→5915 (the already-unidentified pack/cell register,
++999), `148` 65535→64745 (the already-known unused/−1 sentinel register, now
+reading roughly −791 signed — plausibly a net power-flow value, unconfirmed).
 
 ## Sleep / standby (2026-06-25)
 

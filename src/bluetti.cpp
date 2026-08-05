@@ -281,7 +281,7 @@ static bool poll() {
   }
   if (readRegs(REG_CTRL_AC, 1, w, 1) == 1) tmp.acOn = (w[0] != 0);
   if (readRegs(REG_CTRL_DC, 1, w, 1) == 1) tmp.dcOn = (w[0] != 0);
-  if (readRegs(152, 1, w, 1) == 1) tmp.tempC = w[0];     // battery temp degC
+  if (readRegs(156, 1, w, 1) == 1) tmp.tempC = w[0];     // battery temp degC
   if (readRegs(1431, 1, w, 1) == 1) tmp.acOutDV = w[0];  // AC out V x10
   if (readRegs(2020, 1, w, 1) == 1) tmp.chargeMode = w[0];  // 0/1/2/4 mode
   if (readRegs(2214, 1, w, 1) == 1) tmp.gridChargeA = w[0]; // custom grid A
@@ -291,8 +291,7 @@ static bool poll() {
   if (readRegs(2083, 1, w, 1) == 1) tmp.chargeLimit = w[0] >> 8;  // % in hi byte
   if (readRegs(2067, 1, w, 1) == 1) tmp.screenTimeout = w[0];
   if (readRegs(1500, 1, w, 1) == 1) tmp.acOutFreqDHz = w[0];
-  if (readRegs(103, 1, w, 1) == 1) tmp.fanOn = (w[0] != 0);         // best guess, see power.h
-  if (readRegs(161, 1, w, 1) == 1) tmp.gridConnected = (w[0] != 0); // best guess, see power.h
+  if (readRegs(103, 1, w, 1) == 1) tmp.gridConnected = (w[0] != 0); // confirmed, see power.h
   tmp.charging = (tmp.dcInW + tmp.acInW) > (tmp.dcOutW + tmp.acOutW);
   tmp.whRemaining = 0;
   tmp.fetchedMs = millis();

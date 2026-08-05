@@ -82,26 +82,18 @@ static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c) {
   gfx->drawLine(cx - w, cy + q, cx + w, cy - q, c); // cross stroke
 }
 
-// Colour for a battery temperature (deg C): green in the healthy band, amber
-// when cold/warm, red at freezing or hot extremes.
-static uint16_t tempColor(int t) {
-  if (t < 0 || t >= 50) return COL_WARN;    // red: freezing / too hot
-  if (t < 5 || t >= 40) return ACC_LIGHTS;  // amber: cold / warm
-  return COL_ON;                            // green: 5..39 C
-}
-
-// Slim status bar: battery temperature (left, where a clock would go), the
-// settings gear (right) -> Bluetti settings, the SoC battery fill, and a
-// Bluetooth link-state icon.
+// Slim status bar: the settings gear (right) -> Bluetti settings, the SoC
+// battery fill, and a Bluetooth link-state icon.
+//
+// NOTE: reg 152 (power.tempC) is NOT shown here. It reads a plausible value
+// at first use but only ever creeps upward over weeks, never dipping even
+// overnight — behaviour consistent with a BMS-internal peak/record-high
+// stat, not the live battery temperature (which the Bluetti app itself
+// doesn't expose either). Don't wire it back into the UI without confirming
+// what it actually is.
 static void drawPowerStatusBar() {
   const int16_t W = gfx->width();
   gfx->fillRect(0, 0, W, STATUS_H, COL_BAR);
-
-  if (power.tempC != 0) {
-    char tstr[8];
-    snprintf(tstr, sizeof(tstr), "%d\xf8" "C", power.tempC);
-    drawText(tstr, 10, (STATUS_H - 16) / 2, 2, tempColor(power.tempC));
-  }
 
   // Settings gear (far right).
   iconGear(gearX + gearW / 2, STATUS_H / 2, COL_MUTED);
@@ -783,7 +775,7 @@ void ui_tick() {
     static PowerStatus lastPs = (PowerStatus)-1;
     static int lastSoc = -999, lastSum = -999999, lastFlags = -1, lastTtf = -1;
     int sum = power.dcInW + power.acInW + power.dcOutW + power.acOutW +
-              power.tempC + power.chargeMode * 7;
+              power.chargeMode * 7;
     int flags = (power.acOn ? 1 : 0) | (power.dcOn ? 2 : 0) |
                 (power.charging ? 4 : 0);
     if (power.status != lastPs || power.soc != lastSoc || sum != lastSum ||

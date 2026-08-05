@@ -247,12 +247,22 @@ state, so they're unidentified but not the fan. The other blocks previously
 recorded as all-zero (`2400–2449`, `2500–2539`, `3000–3029`, `3500–3549`,
 `3600–3659`) were re-confirmed genuinely all-zero.
 
-**No per-socket telemetry exists for the AC outputs.** A 500 W load produced
-one aggregate figure mirrored across `142` / `1420` / `1430` / `1510`
-(~488 W), with current at `1432` / `1512` and voltage at `1431` / `1511` —
-nothing distinguishing UK socket 1 from socket 2. Unsurprising, since both
-sockets sit behind the same inverter. Don't go looking for per-socket
-breakdown; it isn't there.
+### Per-socket / per-port telemetry: it does not exist (2026-08-05)
+
+Tested every output on the front panel individually, using the live
+Diagnostics change-detector page. **Nothing identifies which physical socket
+or port a load is on.** Don't go looking for it.
+
+| Output tested | What moved |
+|---|---|
+| UK mains socket 1 (500 W) | Only aggregate AC figures: `142` / `1420` / `1430` / `1510` all ~488 W, current `1432` / `1512`, voltage `1431` / `1511`. Plus `103`→2, `161`→1, `124`→2 |
+| UK mains socket 2 | Not separately tested — socket 1 showed only aggregates, and both sockets sit behind the same inverter, so a split is implausible |
+| USB-C (100 W / 140 W) | **Only `103`→2** (the generic net-discharge enum). No dedicated register, and no distinction between the two USB-C ports |
+| USB-A 15 W ×2 | **Nothing at all** — not even `103`. Likely just too small a load to cross whatever threshold flips the net-direction flag |
+
+So the only load telemetry available is the two aggregates already in use:
+reg `140` (DC output W, covers all USB + 12 V DC) and reg `142` (AC output W,
+covers both UK sockets). Anything finer-grained isn't exposed over Modbus.
 
 **Reg 156 = battery temperature — wired in as `power.tempC`** (replacing the
 abandoned reg 152, which only ever crept upward — see the note above). Only

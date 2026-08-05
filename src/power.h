@@ -38,15 +38,11 @@ struct PowerData {
   // non-zero on load-only and falsely lit the mains icon.) See
   // docs/BLUETTI.md "Cooling fan / grid-connected".
   bool gridConnected;  // AC/mains input detected, even before current flows (reg 161 & 2)
-  // Signed net battery power, W. Negative = charging into the battery,
-  // positive = discharging. Confirmed against three states: -791 @ 811W in,
-  // +485 @ 489W out, -798 @ 807W net in.
-  //
-  // Regs 148/149 are really one signed 32-bit value (148 = low word, 149 =
-  // high word doing sign extension: 0 when positive, 0xFFFF when negative).
-  // Reading 148 alone as int16_t is correct and sufficient regardless -- a
-  // 2400 W unit can't approach the +/-32767 W that would overflow it.
-  int netBatteryW;     // reg 148 (low word of the 148/149 pair)
+  // NOTE: no net-battery-power field. Reg 148 was read into one for a while,
+  // believed to be signed net battery flow -- it isn't. It ignores DC output
+  // completely (an 18 W USB load left it reading -1), so it's signed AC power
+  // and adds nothing over regs 146/142, which we already read. See
+  // docs/BLUETTI.md. The device doesn't appear to publish a true net figure.
   uint32_t fetchedMs;  // millis() of last good reading
 };
 

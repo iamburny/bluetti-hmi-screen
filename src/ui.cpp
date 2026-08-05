@@ -397,16 +397,11 @@ static void drawPowerScreen() {
   // left it floating up near the ring stroke instead of reading as a suffix.
   drawText("%", x0 + numW + gap, numTop + (numH - pctH) / 2, 2, ringCol);
 
-  // Net battery power (reg 148, signed): one figure for what the battery is
-  // actually doing, rather than making you subtract the four corner cards.
-  // Device convention kept as-is -- negative = charging into the battery,
-  // positive = discharging out of it. See power.h / docs/BLUETTI.md.
-  if (power.netBatteryW != 0) {
-    char nb[16];
-    snprintf(nb, sizeof(nb), "%+d W", power.netBatteryW);
-    drawCenteredText(nb, cx, cy + 40, 2,
-                     power.netBatteryW < 0 ? COL_ON : OUT_COL);
-  }
+  // NOTE: a "net battery power" figure briefly lived here, fed by reg 148.
+  // Removed -- reg 148 turned out to ignore DC output entirely (an 18 W USB
+  // load left it at -1), so it's signed AC power, not net battery flow. See
+  // docs/BLUETTI.md. Deriving a true net figure would mean summing the four
+  // card values ourselves; the device doesn't appear to publish one.
 
   // Remaining time (device estimate, reg 104) below the gauge — green when
   // charging, white when discharging.

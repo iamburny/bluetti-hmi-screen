@@ -221,21 +221,41 @@ earlier wrong call that reg 103 was the mains flag**:
   `gridConnected` as `reg103 != 0`, which falsely lit the mains icon whenever
   the inverter ran on battery alone. Effectively duplicates the `charging`
   flag we already derive from wattages.
-- **Regs 148/149 = signed net battery power, W, as one 32-bit value**
-  (`power.netBatteryW`) — negative = charging into the battery, positive =
-  discharging. 148 is the low word, 149 the high word doing sign extension
-  (0 when positive, 0xFFFF when negative), which is why 149 looks like it
-  "toggles 0 ↔ 65535" — it's tracking the direction change, not a flag:
+- **Regs 148/149 = signed AC power, W, as one 32-bit value.** Negative = AC
+  input (charging from mains), positive = AC output. 148 is the low word, 149
+  the high word doing sign extension (0 when positive, 0xFFFF when negative),
+  which is why 149 looks like it "toggles 0 ↔ 65535" — it tracks the direction
+  change, it isn't a flag. Reading 148 alone as `int16_t` is sufficient; a
+  2400 W unit can't reach the ±32767 W that would overflow it.
 
-  | State | 148 | 149 | signed 32-bit | actual |
+  ⚠️ **This was first written up as "net battery power" — that was WRONG, and
+  the mistake is instructive.** Three states appeared to confirm it:
+
+  | State | AC in | AC out | DC out | reg 148 |
   |---|---|---|---|---|
   | Idle | 0 | 0 | 0 | 0 |
-  | Discharging | 485 | 0 | +485 | 489 W out |
-  | Charging | 64738 | 65535 | −798 | 807 W net in |
+  | AC load | 0 | 489 W | 0 | +485 |
+  | Charging + AC load | 1339 W | 532 W | 0 | −798 |
 
-  **Reading 148 alone as `int16_t` is correct and sufficient** — a 2400 W unit
-  can't approach the ±32767 W needed to overflow it. (Both were previously
-  dismissed as unused −1 sentinels because they read 65535 in some states.)
+  But every one of those was **AC-only**, so they fit "signed AC power" just as
+  well as "net battery power" — the reading was never actually tested against
+  the case that separates them. Later, a **DC-only** load did separate them:
+
+  | State | AC in | AC out | DC out | reg 148 |
+  |---|---|---|---|---|
+  | 18 W phone on USB-C | 0 | 0 | **18 W** | **−1** (unchanged) |
+  | Same, after AC unplugged and settled | 0 | 0 | 18 W | 0 |
+
+  It ignores DC output entirely. So it adds nothing over regs 146 (AC in) and
+  142 (AC out), which we already read — nothing reads 148 now, and the brief
+  on-screen "net battery power" figure was removed.
+
+  **The device does not appear to publish a true net battery figure at all.**
+  If one is wanted, derive it: `(dcIn + acIn) − (dcOut + acOut)`.
+
+  Lesson for the next register: don't call something confirmed until it's been
+  tested against a state that would *falsify* it, not just states consistent
+  with it. Every AC-only test in the world can't distinguish these two.
 - **Reg 1400 = DC output W** — the ×10-address mirror of reg 140, same as
   `142→1420`. Nothing reads it; we already use 140.
 - **Reg 124** tracks AC output active (0 while charging-only, 2 whenever the

@@ -466,8 +466,8 @@ static bool poll() {
   if (readRegs(REG_CTRL_DC, 1, w, 1) == 1) tmp.dcOn = (w[0] != 0);
   // reg 161 bit1 = AC input present (bit0 = AC output active). See power.h.
   if (readRegs(161, 1, w, 1) == 1) tmp.gridConnected = (w[0] & 0x02) != 0;
-  // reg 148 is signed (two's complement): negative = charging. See power.h.
-  if (readRegs(148, 1, w, 1) == 1) tmp.netBatteryW = (int16_t)w[0];
+  // (reg 148 used to be read here as "net battery power" -- dropped, it only
+  // tracks AC and duplicates 146/142. See power.h / docs/BLUETTI.md.)
 
   // ---- SLOW tier: config + slow-moving values, refreshed occasionally -----
   // These only move when the user changes them (our UI, the phone app, the

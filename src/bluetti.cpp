@@ -243,6 +243,111 @@ static bool writeReg(uint16_t addr, uint16_t val) {
   return false;
 }
 
+// ===== Diagnostics: live register change detection =========================
+// See the header for why this exists. Ranges mirror the readable windows from
+// docs/BLUETTI.md's wide sweep (940 registers total).
+struct DiagRange { uint16_t start, end; };
+static const DiagRange DIAG_RANGES[] = {
+    {0, 20},     {100, 200},   {700, 760},   {1100, 1180}, {1200, 1340},
+    {1400, 1470},{1500, 1560}, {1600, 1610}, {2000, 2090}, {2200, 2280},
+    {2400, 2450},{2500, 2540}, {3000, 3030}, {3500, 3550}, {3600, 3660},
+};
+static const int DIAG_NRANGES = sizeof(DIAG_RANGES) / sizeof(DIAG_RANGES[0]);
+#define DIAG_NREGS 940  // must equal the sum of the ranges above
+
+// Registers measured (this session) to drift continuously -- live watts,
+// volts, currents, frequencies, and monotonic counters. Filtered out so a
+// genuine state flip isn't buried under analogue noise. Deliberately does NOT
+// include 103/124/156/161, which are state-ish and worth watching.
+static bool diagIsNoisy(uint16_t a) {
+  switch (a) {
+    case 100: case 101: case 102: case 104: case 105:
+    case 140: case 141: case 142: case 143: case 144:
+    case 145: case 146: case 147: case 148:
+    case 167: case 188:
+    case 1301: case 1313: case 1314: case 1315:
+    case 1420: case 1430: case 1431: case 1432:
+    case 1500: case 1509: case 1510: case 1511: case 1512:
+    case 2003:
+      return true;
+    default:
+      return false;
+  }
+}
+
+#define DIAG_NCHANGES 24
+static volatile bool g_diagOn = false;
+static uint16_t *g_diagSnap = nullptr;   // baseline values, parallel to the ranges
+static bool g_diagHaveSnap = false;
+static RegChange g_diagChanges[DIAG_NCHANGES];
+static int g_diagHead = 0;   // next write slot
+static int g_diagCount = 0;
+static uint32_t g_diagScanMs = 0;
+static int g_diagScanned = 0;
+static const RegChange DIAG_ZERO = {};
+
+void bluetti_diag_enable(bool on) { g_diagOn = on; }
+bool bluetti_diag_enabled() { return g_diagOn; }
+
+void bluetti_diag_reset() {
+  g_diagHaveSnap = false;
+  g_diagHead = 0;
+  g_diagCount = 0;
+}
+
+int bluetti_diag_count() { return g_diagCount; }
+
+const RegChange &bluetti_diag_at(int i) {
+  if (i < 0 || i >= g_diagCount) return DIAG_ZERO;
+  // Newest first: walk backwards from the most recent write.
+  int idx = (g_diagHead - 1 - i) % DIAG_NCHANGES;
+  if (idx < 0) idx += DIAG_NCHANGES;
+  return g_diagChanges[idx];
+}
+
+uint32_t bluetti_diag_scan_ms() { return g_diagScanMs; }
+int bluetti_diag_scanned() { return g_diagScanned; }
+
+static void diagNote(uint16_t addr, uint16_t oldV, uint16_t newV) {
+  g_diagChanges[g_diagHead] = {addr, oldV, newV, millis()};
+  g_diagHead = (g_diagHead + 1) % DIAG_NCHANGES;
+  if (g_diagCount < DIAG_NCHANGES) g_diagCount++;
+}
+
+// Sweep every readable register, diffing against the baseline. First run just
+// captures the baseline. Block reads of 10 to keep it reasonably quick.
+static void diagScan() {
+  if (!g_diagSnap) {
+    g_diagSnap = (uint16_t *)ps_malloc(DIAG_NREGS * sizeof(uint16_t));
+    if (!g_diagSnap) return;  // no PSRAM -> diagnostics silently unavailable
+    g_diagHaveSnap = false;
+  }
+  uint32_t t0 = millis();
+  bool baseline = !g_diagHaveSnap;
+  int slot = 0, ok = 0;
+  uint16_t buf[10];
+  for (int r = 0; r < DIAG_NRANGES; r++) {
+    for (uint16_t addr = DIAG_RANGES[r].start; addr < DIAG_RANGES[r].end;
+         addr += 10) {
+      uint16_t qty = (uint16_t)min(10, (int)(DIAG_RANGES[r].end - addr));
+      int n = readRegs(addr, qty, buf, 10);
+      for (uint16_t i = 0; i < qty; i++) {
+        if ((int)i < n) {
+          uint16_t a = addr + i, v = buf[i];
+          if (!baseline && g_diagSnap[slot + i] != v && !diagIsNoisy(a))
+            diagNote(a, g_diagSnap[slot + i], v);
+          g_diagSnap[slot + i] = v;
+          ok++;
+        }
+      }
+      slot += qty;
+    }
+  }
+  g_diagHaveSnap = true;
+  g_diagScanned = ok;
+  g_diagScanMs = millis() - t0;
+}
+
 static bool poll() {
   // Released for the phone app: stay disconnected until the window expires.
   if (millis() < g_releaseUntil) {
@@ -306,6 +411,8 @@ static bool poll() {
   BDBG("[bluetti] SoC=%d%% DCout=%d ACout=%d DCin=%d ACin=%d AC%s DC%s\n",
                 tmp.soc, tmp.dcOutW, tmp.acOutW, tmp.dcInW, tmp.acInW,
                 tmp.acOn ? "on" : "off", tmp.dcOn ? "on" : "off");
+  // Diagnostics sweep (only while the Diagnostics page is open -- it's slow).
+  if (g_diagOn) diagScan();
   return true;
 }
 

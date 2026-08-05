@@ -9,7 +9,7 @@
 #include "logic/geom.h"
 
 // ===== Model ================================================================
-enum Screen { POWER, POWER_CHART, BT_SETTINGS };
+enum Screen { POWER, POWER_CHART, BT_SETTINGS, DIAGNOSTICS };
 
 // Which field the keyboard is currently editing (so we can store on commit).
 enum EditTarget { EDIT_NONE, EDIT_BTMAC };
@@ -20,6 +20,13 @@ static int pwrConfirm = 0;
 static bool pwrConfirmTarget = false;
 
 static Screen current = POWER;
+
+// Gear long-press tracking: a short tap opens Bluetti Settings, a ~800ms hold
+// opens the hidden Diagnostics page. The action therefore fires on RELEASE
+// (or on the hold threshold), not on touch-down.
+#define GEAR_HOLD_MS 800
+static bool gearPending = false;
+static uint32_t gearPressMs = 0;
 
 // Computed layout (depends on resolution / rotation).
 static int16_t gearX, gearY, gearW, gearH;  // settings-gear tap rect
@@ -726,6 +733,52 @@ static void drawBtSettings() {
                    power.tempC > 32 ? COL_WARN : COL_MUTED);
 }
 
+// ===== Diagnostics page (hidden: long-press the gear) ======================
+// Live register change detector, built to hunt the cooling-fan register after
+// two offline sweep campaigns came up empty (see docs/BLUETTI.md). The BLE
+// task sweeps all 940 readable registers after each poll and reports any that
+// moved; known continuously-drifting registers are filtered out in
+// bluetti.cpp so a real state flip stands out. Tap = re-baseline.
+static void drawDiagnostics() {
+  const int16_t W = gfx->width(), H = gfx->height();
+  gfx->fillScreen(COL_BG);
+  drawText("Diagnostics - register changes", 8, 8, 1, COL_MUTED);
+
+  char hdr[64];
+  snprintf(hdr, sizeof(hdr), "%d regs in %lums   %d change%s", bluetti_diag_scanned(),
+           (unsigned long)bluetti_diag_scan_ms(), bluetti_diag_count(),
+           bluetti_diag_count() == 1 ? "" : "s");
+  drawText(hdr, 8, 24, 1, COL_TEXT);
+  drawText("tap = re-baseline    swipe right = back", 8, H - 14, 1, COL_OFF);
+
+  int n = bluetti_diag_count();
+  if (n == 0) {
+    drawCenteredText(bluetti_diag_scanned() ? "No changes since baseline"
+                                            : "Scanning...",
+                     W / 2, H / 2 - 8, 2, COL_MUTED);
+    drawCenteredText("Trigger the event now (e.g. wait for the fan)", W / 2,
+                     H / 2 + 18, 1, COL_OFF);
+    return;
+  }
+
+  // Two columns of changes, newest first.
+  const int16_t rowH = 20, top = 44, perCol = 11;
+  if (n > perCol * 2) n = perCol * 2;
+  for (int i = 0; i < n; i++) {
+    const RegChange &c = bluetti_diag_at(i);
+    int16_t x = (i < perCol) ? 8 : W / 2 + 4;
+    int16_t y = top + (i % perCol) * rowH;
+    char line[40];
+    snprintf(line, sizeof(line), "%u: %u>%u", c.addr, c.oldVal, c.newVal);
+    // Newest few highlighted -- they're the ones tied to what just happened.
+    drawText(line, x, y, 1, i < 3 ? COL_ON : COL_TEXT);
+    char ago[12];
+    uint32_t secs = (millis() - c.atMs) / 1000;
+    snprintf(ago, sizeof(ago), "%lus", (unsigned long)secs);
+    drawText(ago, x + 150, y, 1, COL_OFF);
+  }
+}
+
 // ===== Public ===============================================================
 // --- Pending-write ("Applying…") feedback ---------------------------------
 // Bluetti control writes confirm asynchronously (read-back ~1-2s), so a tap
@@ -767,6 +820,7 @@ void ui_draw() {
     case POWER: drawPowerScreen(); break;
     case POWER_CHART: drawChartScreen(); break;
     case BT_SETTINGS: drawBtSettings(); break;
+    case DIAGNOSTICS: drawDiagnostics(); break;
   }
   if (g_writePending && (current == POWER || current == BT_SETTINGS))
     drawPendingSpinner();
@@ -872,6 +926,20 @@ void ui_tick() {
     return;
   }
 
+  // Diagnostics: repaint whenever a sweep finishes or a change is recorded.
+  if (current == DIAGNOSTICS) {
+    static int lastDiagCount = -1;
+    static uint32_t lastDiagScan = 0;
+    int c = bluetti_diag_count();
+    uint32_t sm = bluetti_diag_scan_ms();
+    if (c != lastDiagCount || sm != lastDiagScan) {
+      lastDiagCount = c;
+      lastDiagScan = sm;
+      ui_draw();
+    }
+    return;
+  }
+
   // Redraw the Bluetti settings sub-page when a toggle is confirmed by a poll.
   if (current == BT_SETTINGS) {
     static int lastBt = -1, lastBt2 = -1;
@@ -913,10 +981,11 @@ void ui_handle_touch(int16_t x, int16_t y) {
   // Power screen: gear -> Bluetti settings, output-card toggles, app-release,
   // and the confirm step.
   if (current == POWER) {
-    // Settings gear (top-right of the status bar).
+    // Settings gear: latch the press only. A tap opens Bluetti Settings on
+    // release; a ~800ms hold opens Diagnostics (see ui_handle_drag/release).
     if (inRect(x, y, gearX, gearY, gearW, gearH)) {
-      current = BT_SETTINGS;
-      ui_draw();
+      gearPending = true;
+      gearPressMs = millis();
       return;
     }
     // App mode: no dedicated button anymore (release/resume both live on
@@ -1067,11 +1136,40 @@ void ui_handle_touch(int16_t x, int16_t y) {
     }
     return;
   }
+
+  // Diagnostics: any tap re-baselines the change detector.
+  if (current == DIAGNOSTICS) {
+    bluetti_diag_reset();
+    ui_draw();
+    return;
+  }
 }
 
-void ui_handle_drag(int16_t, int16_t) {}  // no continuous controls in this build
+// Called continuously while a finger is held down. Only used for the gear
+// long-press (there are no continuous controls in this build).
+void ui_handle_drag(int16_t x, int16_t y) {
+  if (!gearPending) return;
+  if (!inRect(x, y, gearX, gearY, gearW, gearH)) {  // slid off the button
+    gearPending = false;
+    return;
+  }
+  if (millis() - gearPressMs >= GEAR_HOLD_MS) {
+    gearPending = false;
+    bluetti_diag_enable(true);
+    bluetti_diag_reset();
+    current = DIAGNOSTICS;
+    ui_draw();
+  }
+}
 
 void ui_handle_release(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
+  // Gear released before the hold threshold -> treat as a tap: open settings.
+  if (gearPending) {
+    gearPending = false;
+    current = BT_SETTINGS;
+    ui_draw();
+    return;
+  }
   if (current == POWER) return;
   int dx = x1 - x0, dy = y1 - y0;
   if (abs(dx) < 60 || abs(dx) < abs(dy)) return;  // not a clear horizontal swipe
@@ -1079,6 +1177,8 @@ void ui_handle_release(int16_t x0, int16_t y0, int16_t x1, int16_t y1) {
   // Left->right swipe = go back to the Power screen (the only destination left).
   if (dx > 0) {
     pwrConfirm = 0;
+    // Stop the diagnostics sweep on the way out -- it badly slows telemetry.
+    if (current == DIAGNOSTICS) bluetti_diag_enable(false);
     current = POWER;
     ui_draw();
   }

@@ -267,6 +267,16 @@ Treat the fan as unavailable unless someone turns up vendor documentation or
 a different function code. Don't spend more time sweeping for it — three
 campaigns and the screen-state result all point the same way.
 
+**The fan is not driven by reg 156 (battery temp), so don't try to synthesise
+a fan indicator from it.** Observed: reg 156 stayed at 26 °C across the fan
+both starting *and* stopping. That fits — the fan cools the **inverter /
+power electronics**, whose MOSFETs and transformer heat up within seconds of
+a load, whereas the battery pack's thermal mass moves far too slowly (it
+tracked 24→25→26 °C over a whole session). The internal heatsink sensor that
+actually drives the fan isn't exposed either. Incidentally this is decent
+corroboration that reg 156 really is battery temperature: a slow, monotonic,
+plausible drift rather than something mislabelled.
+
 **Correction to the wide-sweep notes above: `700–759` is NOT all-zero.**
 Found populated: `701`=2, `702`=32177, `703`=1526, `704`=61, `705`=256,
 `721`=1, `722`=513, `723`=25600. None of them flipped with fan/load/charge

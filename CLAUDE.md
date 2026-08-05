@@ -98,7 +98,9 @@ The firmware is a BLE **client** that connects to the Elite 300, completes the
 encrypted "v2" handshake, and decrypts telemetry **on-device** using mbedTLS.
 This is the open-source community crypto (universal hardcoded keys) — **not**
 the closed official `.so` and **not** a bridge/Raspberry Pi. A FreeRTOS task
-(core 0) holds one persistent connection, polls every 15 s, and fills
+(core 0) holds one persistent connection, polls every 3 s (`POLL_MS` in
+`bluetti.cpp`; no WiFi in this build to share the radio with, so it can poll
+faster than the parent multi-feature project did), and fills
 `PowerData` (SoC, DC/AC in/out watts). Commands ride the encrypted channel as
 **Modbus RTU** (read FC3, write FC6); regs 2011/2012 toggle AC/DC output. Only
 one BLE client at a time — `bluetti_release(seconds)` drops the link so the

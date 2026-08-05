@@ -22,7 +22,12 @@ static const uint16_t SVC_UUID = 0xFF00;
 static const uint16_t NOTIFY_UUID = 0xFF01;  // device -> app
 static const uint16_t WRITE_UUID = 0xFF02;   // app -> device
 
-#define POLL_MS 15000   // refresh period while connected
+// Refresh period while connected. ~15 register reads/poll at ~100-150ms each
+// (40ms BLE_GAP_MS + notify round-trip) costs ~1.5-2.25s active time, so 3s
+// leaves comfortable slack for the occasional retry while updating far more
+// often than the old 15s. No WiFi/BLE coexistence to worry about in this
+// build (BLE has the radio to itself), so there's no reason to poll slower.
+#define POLL_MS 3000
 #define RETRY_MS 4000   // retry period after a failure / reconnect
 #define DEVNAME_PREFIX "EL300"
 

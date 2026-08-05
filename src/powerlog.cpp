@@ -3,9 +3,13 @@
 #include "sdcard.h"
 #include <SD_MMC.h>
 
-// 24 h at one sample per poll (~15 s) = 5760 samples * 12 B ~= 69 KB in PSRAM.
+// 24 h at one sample per 15 s = 5760 samples * 12 B ~= 69 KB in PSRAM.
 static const int RING_N = 5760;
-static const uint32_t SAMPLE_INTERVAL_MS = 15000;  // matches the BLE POLL_MS
+// Deliberately independent of bluetti.cpp's POLL_MS (which is faster, for a
+// responsive live display) -- this throttle just keeps the history chart's
+// sample rate (and RING_N's 24h budget) stable regardless of how often the
+// BLE task actually polls.
+static const uint32_t SAMPLE_INTERVAL_MS = 15000;
 
 static PwrSample *ring = nullptr;
 static int head = 0;    // next write slot

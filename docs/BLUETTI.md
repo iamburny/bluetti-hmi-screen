@@ -232,8 +232,10 @@ Runtime design (in `bluetti.cpp`):
   connect + handshake once, reuse for all ops, reconnect only if dropped
   (`ensureConnected`). This was the key reliability fix — per‑op reconnect was
   flaky.
-- Polls every **15 s** (`POLL_MS`), retries after **4 s** on failure; each
-  read/write retries up to **3×** (lost notifications under WiFi/BLE coexistence).
+- Polls every **3 s** (`POLL_MS`) — this fork has no WiFi to share the 2.4 GHz
+  radio with, so it polls faster than the parent multi-feature project's 15 s;
+  retries after **4 s** on failure. Each read/write retries up to **3×**
+  (occasional lost BLE notifications).
 - Polls: `102→soc`, `104→ttfMin`, `140‑block (qty 8)→dcOut/acOut/dcIn/acIn`,
   `2011→acOn`, `2012→dcOn`. `charging = inputs > outputs`. `whRemaining` not mapped.
 - `power_valid()` tolerates **60 s** of staleness (rides out brief BLE gaps).

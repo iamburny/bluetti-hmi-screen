@@ -24,9 +24,13 @@ static const uint16_t WRITE_UUID = 0xFF02;   // app -> device
 
 // Refresh period while connected -- runtime-adjustable so it can be tuned
 // against the link-health counters on the Diagnostics page (see bluetti.h).
-// NOTE the real limit is the poll DURATION (~17 sequential reads, each a 40ms
-// BLE_GAP_MS plus a notify round-trip, so ~1.5-2.5s); setting the interval
-// below that just polls back-to-back rather than going faster.
+//
+// NOTE this is a sleep AFTER each poll, so the true update period is
+// (poll duration + interval), not the interval alone. And the real limit is
+// the poll duration: reads are sequential, each costing the inter-command gap
+// plus a notify round-trip (~45ms/read at a 20ms gap). Measured: 17 reads
+// ~1020-1320ms at a 40ms gap. Hence the fast/slow tier split in poll(), which
+// cuts a typical poll to 7 reads.
 #define POLL_MS_DEFAULT 3000
 #define POLL_MS_MIN 250
 #define POLL_MS_MAX 30000
@@ -55,6 +59,23 @@ void bluetti_set_poll_ms(uint32_t ms) {
 
 static const uint16_t REG_CTRL_AC = 2011;
 static const uint16_t REG_CTRL_DC = 2012;
+
+// Slow-tier read cache -- see the SLOW tier comment in poll(). Ten config /
+// slow-moving registers that don't need re-reading every cycle; carried
+// forward between polls so PowerData stays complete.
+#define SLOW_EVERY 10
+struct SlowCache {
+  int tempC, acOutDV, acOutFreqDHz, chargeMode, gridChargeA, chargeLimit,
+      screenTimeout;
+  bool acEco, dcEco, powerLift;
+  bool valid;
+};
+static SlowCache g_slow = {};
+static uint32_t g_slowTick = 0;
+// Force a full (slow-tier included) read on the next poll: set at startup, on
+// every reconnect, and after any write so a user's change appears immediately
+// rather than waiting up to SLOW_EVERY polls.
+static volatile bool g_forceFull = true;
 
 // Frames pushed from the NimBLE notify callback to the poller task.
 struct Frame {
@@ -188,6 +209,7 @@ static bool connectAndHandshake() {
     return false;
   }
   BDBG("[bluetti] secure link established\n");
+  g_forceFull = true;  // fresh link -- re-read the slow tier, don't trust cache
   // Stay BTC_CONNECTING until the first successful telemetry read (in poll());
   // the link being up isn't useful to the UI until real data arrives.
   vTaskDelay(200 / portTICK_PERIOD_MS);  // let the device settle
@@ -428,6 +450,8 @@ static bool poll() {
     return false;
   }
   tmp.soc = bluetti_clamp_soc(w[0]);
+
+  // ---- FAST tier: read every poll (live values, or user-visible latches) ---
   if (readRegs(104, 1, w, 1) == 1) tmp.ttfMin = w[0];
   int n = readRegs(140, 8, w, 8);
   if (n >= 7) {
@@ -436,22 +460,48 @@ static bool poll() {
     tmp.dcInW = w[4];   // 144
     tmp.acInW = w[6];   // 146
   }
+  // AC/DC output state stays fast: the unit's own front-panel buttons can
+  // change it, and the UI must not lag behind the hardware.
   if (readRegs(REG_CTRL_AC, 1, w, 1) == 1) tmp.acOn = (w[0] != 0);
   if (readRegs(REG_CTRL_DC, 1, w, 1) == 1) tmp.dcOn = (w[0] != 0);
-  if (readRegs(156, 1, w, 1) == 1) tmp.tempC = w[0];     // battery temp degC
-  if (readRegs(1431, 1, w, 1) == 1) tmp.acOutDV = w[0];  // AC out V x10
-  if (readRegs(2020, 1, w, 1) == 1) tmp.chargeMode = w[0];  // 0/1/2/4 mode
-  if (readRegs(2214, 1, w, 1) == 1) tmp.gridChargeA = w[0]; // custom grid A
-  if (readRegs(2017, 1, w, 1) == 1) tmp.acEco = (w[0] != 0);
-  if (readRegs(2014, 1, w, 1) == 1) tmp.dcEco = (w[0] != 0);
-  if (readRegs(2021, 1, w, 1) == 1) tmp.powerLift = (w[0] != 0);
-  if (readRegs(2083, 1, w, 1) == 1) tmp.chargeLimit = w[0] >> 8;  // % in hi byte
-  if (readRegs(2067, 1, w, 1) == 1) tmp.screenTimeout = w[0];
-  if (readRegs(1500, 1, w, 1) == 1) tmp.acOutFreqDHz = w[0];
   // reg 161 bit1 = AC input present (bit0 = AC output active). See power.h.
   if (readRegs(161, 1, w, 1) == 1) tmp.gridConnected = (w[0] & 0x02) != 0;
   // reg 148 is signed (two's complement): negative = charging. See power.h.
   if (readRegs(148, 1, w, 1) == 1) tmp.netBatteryW = (int16_t)w[0];
+
+  // ---- SLOW tier: config + slow-moving values, refreshed occasionally -----
+  // These only move when the user changes them (our UI, the phone app, the
+  // unit's menus) or drift slowly, so reading all ten every poll was ~60% of
+  // the poll budget for no benefit. Cached and refreshed every SLOW_EVERY
+  // polls, plus immediately after any write and on every reconnect, so a
+  // user-initiated change still shows up on the very next poll.
+  if (g_forceFull || !g_slow.valid || (g_slowTick % SLOW_EVERY) == 0) {
+    if (readRegs(156, 1, w, 1) == 1) g_slow.tempC = w[0];        // battery temp degC
+    if (readRegs(1431, 1, w, 1) == 1) g_slow.acOutDV = w[0];     // AC out V x10
+    if (readRegs(1500, 1, w, 1) == 1) g_slow.acOutFreqDHz = w[0];
+    if (readRegs(2020, 1, w, 1) == 1) g_slow.chargeMode = w[0];  // 0/1/2/4 mode
+    if (readRegs(2214, 1, w, 1) == 1) g_slow.gridChargeA = w[0]; // custom grid A
+    if (readRegs(2017, 1, w, 1) == 1) g_slow.acEco = (w[0] != 0);
+    if (readRegs(2014, 1, w, 1) == 1) g_slow.dcEco = (w[0] != 0);
+    if (readRegs(2021, 1, w, 1) == 1) g_slow.powerLift = (w[0] != 0);
+    if (readRegs(2083, 1, w, 1) == 1) g_slow.chargeLimit = w[0] >> 8;  // % in hi byte
+    if (readRegs(2067, 1, w, 1) == 1) g_slow.screenTimeout = w[0];
+    g_slow.valid = true;
+    g_forceFull = false;
+  }
+  g_slowTick++;
+
+  tmp.tempC = g_slow.tempC;
+  tmp.acOutDV = g_slow.acOutDV;
+  tmp.acOutFreqDHz = g_slow.acOutFreqDHz;
+  tmp.chargeMode = g_slow.chargeMode;
+  tmp.gridChargeA = g_slow.gridChargeA;
+  tmp.acEco = g_slow.acEco;
+  tmp.dcEco = g_slow.dcEco;
+  tmp.powerLift = g_slow.powerLift;
+  tmp.chargeLimit = g_slow.chargeLimit;
+  tmp.screenTimeout = g_slow.screenTimeout;
+
   tmp.charging = (tmp.dcInW + tmp.acInW) > (tmp.dcOutW + tmp.acOutW);
   tmp.whRemaining = 0;
   tmp.fetchedMs = millis();
@@ -492,6 +542,7 @@ static void bluettiTask(void*) {
 void bluetti_write_reg(uint16_t addr, uint16_t val) {
   PendWrite pw{addr, val};
   if (g_writeQ) xQueueSend(g_writeQ, &pw, 0);
+  g_forceFull = true;  // most writes target slow-tier regs -- re-read them now
   if (g_wake) xSemaphoreGive(g_wake);  // apply immediately on the next cycle
 }
 

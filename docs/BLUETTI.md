@@ -268,11 +268,19 @@ Runtime design (in `bluetti.cpp`):
 
 ## Power screen (UI)
 
-- Centre ring gauge: SoC % + remaining kWh.
+Full-height, no status bar — this is the app's home screen.
+
+- Centre ring gauge: SoC % + remaining time.
 - Four corner cards — `DC IN`/`AC IN` (display) and `DC OUT`/`AC OUT` which
-  **double as on/off toggles** (green border + ON / grey + OFF) with a confirm step.
-- Phone‑icon **release‑for‑app** button (90 s window with countdown).
-- Status‑bar battery + dashboard battery card also reflect SoC.
+  **double as on/off toggles** (green border + a bottom-left dot when on,
+  grey border + no dot when off) with a confirm step.
+- Settings gear in the gap between `AC IN` and `AC OUT` -> Bluetti Settings.
+- Bluetooth link icon (flashes while connecting) only shown on the "Bluetti
+  offline" state — the only time link status isn't otherwise visible.
+- Bluetti Settings carries a top utility row — history chart + **release-for-
+  app** (phone icon, 90 s window with countdown) — always available
+  regardless of connection state, above the ECO/charge-limit/timeout/pairing
+  rows that need live data.
 
 ## Tests
 

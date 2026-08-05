@@ -3,7 +3,7 @@
 
 // Shared UI palette (cohesive dark theme with one accent per function).
 #define COL_BG RGB565(15, 17, 23)        // app background (near-black)
-#define COL_BAR RGB565(26, 30, 40)       // status bar
+#define COL_BAR RGB565(26, 30, 40)       // dark backing (icon hubs, spinner disc)
 #define COL_TILE RGB565(32, 37, 50)      // tile / key base
 #define COL_TILE_DN RGB565(54, 62, 82)   // pressed
 #define COL_TEXT RGB565(236, 239, 245)   // primary text

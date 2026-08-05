@@ -8,8 +8,6 @@
 #include "bluetti.h"
 #include "logic/geom.h"
 
-#define STATUS_H 34  // status-bar height
-
 // ===== Model ================================================================
 enum Screen { POWER, POWER_CHART, BT_SETTINGS };
 
@@ -24,8 +22,7 @@ static bool pwrConfirmTarget = false;
 static Screen current = POWER;
 
 // Computed layout (depends on resolution / rotation).
-static int16_t gearX, gearY, gearW, gearH;  // status-bar settings button
-static int16_t battX, battY, battW, battH;  // status-bar battery indicator
+static int16_t gearX, gearY, gearW, gearH;  // settings-gear tap rect
 
 // Bluetti-settings list row hit-rect geometry base.
 static int16_t nameRowX, nameRowY, nameRowW, nameRowH;
@@ -47,32 +44,34 @@ static void iconGear(int16_t cx, int16_t cy, uint16_t c) {
 
 // ===== Layout ===============================================================
 static void layout() {
-  const int16_t W = gfx->width();
+  const int16_t W = gfx->width(), H = gfx->height();
   const int16_t margin = 12;
 
-  // Settings gear: a tappable square at the right of the status bar.
-  gearW = gearH = STATUS_H;
-  gearX = W - gearW;
-  gearY = 0;
+  // Settings gear: no status bar to anchor it to anymore, so it sits in the
+  // empty gap between the AC IN (top) and AC OUT (bottom) cards, right-hand
+  // side. Matches powerCardRect's own geometry (m=10, card 140x80).
+  const int16_t cardM = 10, cardW = 140, cardH = 80;
+  const int16_t gapCx = W - cardM - cardW / 2;
+  const int16_t gapTop = cardM + cardH, gapBot = H - cardM - cardH;
+  gearW = gearH = 44;
+  gearX = gapCx - gearW / 2;
+  gearY = (gapTop + gapBot) / 2 - gearH / 2;
 
-  // Status-bar battery indicator (left of the gear).
-  battW = 26;
-  battH = 14;
-  battX = gearX - 10 - battW;
-  battY = (STATUS_H - battH) / 2;
-
-  // Bluetti-settings list rows — compact pitch to fit 6 rows on the 320px-tall
-  // screen (3 toggles, charge-limit, screen-timeout, pairing).
+  // Bluetti-settings list rows — compact pitch to fit a top utility row
+  // (history/release) plus 6 rows on the 320px-tall screen (3 toggles,
+  // charge-limit, screen-timeout, pairing) with no title to spend space on.
   nameRowX = margin;
-  nameRowY = 50;
+  nameRowY = 56;
   nameRowW = W - 2 * margin;
   nameRowH = 36;
 }
 
-// ===== Status bar (drawn atop the Power screen) =============================
+// ===== Bluetooth link icon (shown only while offline/connecting) ===========
+// No persistent status bar in this build: the SoC is already the headline
+// number on the gauge (a battery icon would be redundant), and the Bluetooth
+// icon is only useful while there's no live data to show yet, so it lives on
+// the "Bluetti offline" screen instead of a bar every screen has to carry.
 static uint8_t btAnimPhase = 0;  // toggles while connecting to the Bluetti
-
-// Bluetooth rune: vertical spine + the two crossing strokes.
 static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c) {
   const int16_t h = 7, w = 4, q = 3;
   gfx->drawLine(cx, cy - h, cx, cy + h, c);         // spine
@@ -82,42 +81,12 @@ static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c) {
   gfx->drawLine(cx - w, cy + q, cx + w, cy - q, c); // cross stroke
 }
 
-// Slim status bar: the settings gear (right) -> Bluetti settings, the SoC
-// battery fill, and a Bluetooth link-state icon.
-//
-// NOTE: reg 152 (power.tempC) is NOT shown here. It reads a plausible value
-// at first use but only ever creeps upward over weeks, never dipping even
-// overnight — behaviour consistent with a BMS-internal peak/record-high
-// stat, not the live battery temperature (which the Bluetti app itself
-// doesn't expose either). Don't wire it back into the UI without confirming
-// what it actually is.
-static void drawPowerStatusBar() {
-  const int16_t W = gfx->width();
-  gfx->fillRect(0, 0, W, STATUS_H, COL_BAR);
-
-  // Settings gear (far right).
-  iconGear(gearX + gearW / 2, STATUS_H / 2, COL_MUTED);
-
-  // Battery: real SoC when available, else empty outline.
-  gfx->drawRoundRect(battX, battY, battW, battH, 3, COL_TEXT);
-  gfx->fillRect(battX + battW, battY + 4, 2, battH - 8, COL_TEXT);
-  if (power_valid()) {
-    int pct = power_soc();
-    int16_t fw = (battW - 4) * pct / 100;
-    if (fw > 0)
-      gfx->fillRect(battX + 2, battY + 2, fw, battH - 4,
-                    pct <= 15 ? COL_WARN : COL_ON);
-  }
-
-  // Bluetooth: grey when idle, flashing while connecting, solid blue when linked.
-  BluettiConn bt = bluetti_state();
-  uint16_t btCol = (bt == BTC_ONLINE)
-                       ? ACC_WEATHER
-                       : (bt == BTC_CONNECTING)
-                             ? ((btAnimPhase & 1) ? COL_OFF : ACC_WEATHER)
-                             : COL_MUTED;
-  iconBluetooth(battX - 24, STATUS_H / 2, btCol);
-}
+// NOTE: reg 152 (power.tempC) is intentionally not shown anywhere in the UI.
+// It reads a plausible value at first use but only ever creeps upward over
+// weeks, never dipping even overnight — behaviour consistent with a
+// BMS-internal peak/record-high stat, not the live battery temperature
+// (which the Bluetti app itself doesn't expose either). Don't wire it back
+// in without confirming what it actually is.
 
 // Thick rounded arc gauge: a 270-degree track (open at the bottom) with the
 // lower `frac` portion filled. Drawn from overlapping dots so it has rounded
@@ -145,7 +114,7 @@ static void powerCardRect(int idx, int16_t& x, int16_t& y, int16_t& w,
   w = 140;
   h = 80;
   x = (idx == 0 || idx == 2) ? m : (W - m - w);
-  y = (idx < 2) ? (STATUS_H + m) : (H - m - h);  // top cards sit below the bar
+  y = (idx < 2) ? m : (H - m - h);  // no status bar -- top cards sit at the margin
 }
 
 // One corner readout card: short bold label + big watt value. Output cards
@@ -183,20 +152,25 @@ static void iconPhone(int16_t cx, int16_t cy, uint16_t c) {
   gfx->fillCircle(cx, cy + 9, 1, c);         // home button
 }
 
-// Bottom-centre control buttons (icon-only), centred as a trio:
-// [history-chart] [charge-mode] [app-release]. 50px wide, 12px gap.
+// Bottom-centre charge-mode button on the Power screen (the only one left
+// there -- history and app-release moved to the Bluetti Settings page).
 static const int16_t PWR_BTN_W = 50, PWR_BTN_H = 42, PWR_BTN_Y = 270;
-static void powerChartBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
-  w = PWR_BTN_W; h = PWR_BTN_H; y = PWR_BTN_Y;
-  x = gfx->width() / 2 - 87;  // left
-}
 static void powerChargeBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   w = PWR_BTN_W; h = PWR_BTN_H; y = PWR_BTN_Y;
-  x = gfx->width() / 2 - 25;  // centre
+  x = gfx->width() / 2 - PWR_BTN_W / 2;  // centre
 }
-static void powerReleaseRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
-  w = PWR_BTN_W; h = PWR_BTN_H; y = PWR_BTN_Y;
-  x = gfx->width() / 2 + 37;  // right
+
+// Top-of-screen utility row on the Bluetti Settings page: history (left) and
+// app-release (right). Always available regardless of connection state, so
+// callers must draw/handle these before any power_valid() gate.
+static const int16_t BT_BTN_Y = 8;
+static void btChartBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+  w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
+  x = gfx->width() / 2 - 6 - PWR_BTN_W;  // left of centre
+}
+static void btReleaseBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+  w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
+  x = gfx->width() / 2 + 6;  // right of centre
 }
 
 // Mini bar-chart glyph for the history button.
@@ -209,14 +183,14 @@ static void iconChart(int16_t cx, int16_t cy, uint16_t c) {
 }
 static void drawChartButton() {
   int16_t x, y, w, h;
-  powerChartBtnRect(x, y, w, h);
+  btChartBtnRect(x, y, w, h);
   gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
   gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
   iconChart(x + w / 2, y + h / 2, ACC_WATER);
 }
 static void drawReleaseButton(int rem) {
   int16_t x, y, w, h;
-  powerReleaseRect(x, y, w, h);
+  btReleaseBtnRect(x, y, w, h);
   gfx->fillRoundRect(x, y, w, h, 8, rem > 0 ? ACC_SETTINGS : COL_TILE);
   gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
   iconPhone(x + w / 2, y + h / 2, rem > 0 ? COL_BG : COL_TEXT);
@@ -274,37 +248,48 @@ static void drawChargeModeButton() {
   drawChargeModeIcon(power.chargeMode, x + w / 2, y + h / 2, c);
 }
 
-// Power monitor: a status bar, a central battery ring gauge (SoC % + remaining
-// time) framed by four corner cards — DC/AC input (top) and DC/AC output
-// (bottom), plus AC/DC output toggles. This is the home screen.
+// Power monitor: a central battery ring gauge (SoC % + remaining time) framed
+// by four corner cards — DC/AC input (top) and DC/AC output (bottom), plus
+// AC/DC output toggles. Full-height (no status bar); the settings gear sits
+// in the gap between AC IN and AC OUT. This is the home screen.
 static void drawPowerScreen() {
   const int16_t W = gfx->width(), H = gfx->height();
   gfx->fillScreen(COL_BG);
-  drawPowerStatusBar();
+  // Settings gear -- drawn unconditionally (before the early returns below)
+  // so it's reachable regardless of connection state.
+  iconGear(gearX + gearW / 2, gearY + gearH / 2, COL_MUTED);
 
   const uint16_t IN_COL = RGB565(0, 176, 255);    // inputs: cyan/blue
   const uint16_t OUT_COL = RGB565(255, 150, 40);  // outputs: amber
   const uint16_t TRACK = RGB565(38, 42, 52);      // unfilled gauge track
 
-  // App mode: link released so the phone app can connect.
+  // App mode: link released so the phone app can connect. No dedicated
+  // button anymore (release/resume both live on the Settings page) -- any
+  // tap on this screen resumes early, see ui_handle_touch.
   int rem = (int)bluetti_release_remaining();
   if (rem > 0) {
     drawCenteredText("Released for app", W / 2, H / 2 - 24, 3, ACC_SETTINGS);
     char t[32];
     snprintf(t, sizeof(t), "Reconnecting in %ds", rem);
     drawCenteredText(t, W / 2, H / 2 + 14, 2, COL_MUTED);
-    drawReleaseButton(rem);
+    drawCenteredText("(tap to resume now)", W / 2, H / 2 + 44, 1, COL_MUTED);
     return;
   }
 
   if (!power_valid()) {
+    // Bluetooth icon: flashes while actively connecting, muted otherwise --
+    // the only place this app shows link state, since it's only useful
+    // before there's live data to show instead.
+    BluettiConn bt = bluetti_state();
+    uint16_t btCol = (bt == BTC_CONNECTING)
+                         ? ((btAnimPhase & 1) ? COL_OFF : ACC_WEATHER)
+                         : COL_MUTED;
+    iconBluetooth(W / 2, H / 2 - 66, btCol);
     drawCenteredText("Bluetti offline", W / 2, H / 2 - 30, 3, COL_WARN);
     drawCenteredText(strlen(settings.bluettiMac)
                          ? "Connecting to the Bluetti..."
                          : "Searching for the Bluetti...",
                      W / 2, H / 2 + 6, 2, COL_MUTED);
-    drawChartButton();  // history is still viewable while offline
-    drawReleaseButton(0);
     return;
   }
 
@@ -343,11 +328,9 @@ static void drawPowerScreen() {
     drawCenteredText(tt, cx, 250, 2, power.charging ? COL_ON : COL_TEXT);
   }
 
-  // App-release button, or a centered confirm modal when a toggle is pending.
+  // Charge-mode button, or a centered confirm modal when a toggle is pending.
   if (pwrConfirm == 0) {
-    drawChartButton();
     drawChargeModeButton();
-    drawReleaseButton(0);
   } else {
     int16_t mx, my, mw, mh;
     powerModalRect(mx, my, mw, mh);
@@ -568,7 +551,7 @@ static void drawSettingRow(int16_t x, int16_t y, int16_t w, int16_t h,
 }
 
 // Shared compact row geometry for the Bluetti settings page.
-static int16_t srowY(int i) { return nameRowY + i * (nameRowH + 6); }
+static int16_t srowY(int i) { return nameRowY + i * (nameRowH + 4); }
 
 // One tappable toggle row (label left, ON/OFF pill right) for the Bluetti page.
 static void drawBtToggleRow(int i, const char *label, bool on) {
@@ -628,14 +611,24 @@ static const char *btTimeoutLabel(int e) {
   }
 }
 
-// Bluetti settings sub-page (opened from the status-bar gear): output ECO,
-// charge limit, screen timeout, and BLE pairing. Back = left->right swipe.
+// Bluetti settings sub-page (opened via the gear icon on the Power screen):
+// a top utility row (history chart + app-release, always available), then
+// output ECO, charge limit, screen timeout, and BLE pairing (once live data
+// has arrived). No title -- self-explanatory from the gear that opens it.
+// Back = left->right swipe.
 static void drawBtSettings() {
-  const int16_t W = gfx->width(), H = gfx->height();
+  const int16_t W = gfx->width();
   gfx->fillScreen(COL_BG);
-  drawCenteredText("Bluetti Settings", W / 2, 30, 3, COL_TEXT);
-  // Don't show/allow editing the controls until live data has arrived.
+
+  // History + app-release: available regardless of connection state, so
+  // drawn (and handled, in ui_handle_touch) before the power_valid() gate.
+  drawChartButton();
+  drawReleaseButton((int)bluetti_release_remaining());
+
+  // Don't show/allow editing the rest of the controls until live data has
+  // arrived.
   if (!power_valid()) {
+    const int16_t H = gfx->height();
     drawCenteredText("Connecting to the Bluetti...", W / 2, H / 2 - 8, 2,
                      COL_MUTED);
     drawCenteredText("Settings unlock once data is received", W / 2, H / 2 + 18,
@@ -763,22 +756,23 @@ void ui_tick() {
       ui_draw();
     }
 
-    // Bluetooth status-bar icon: redraw on state change; flash while connecting.
-    static BluettiConn lastBtIcon = (BluettiConn)-1;
-    BluettiConn bti = bluetti_state();
-    if (bti != lastBtIcon) {
-      lastBtIcon = bti;
-      drawPowerStatusBar();
-      gfx->flush();
-    }
-    if (bti == BTC_CONNECTING) {
+    if (!power_valid()) {
+      // Animate the Bluetooth icon on the offline screen while connecting;
+      // redraw (full, but cheap -- it's just two lines of text + an icon)
+      // on any link-state change too.
+      static BluettiConn lastBtIcon = (BluettiConn)-1;
       static uint32_t lastBtAnim = 0;
-      if (millis() - lastBtAnim > 400) {
+      BluettiConn bti = bluetti_state();
+      bool tick = bti == BTC_CONNECTING && millis() - lastBtAnim > 400;
+      if (tick) {
         lastBtAnim = millis();
         btAnimPhase++;
-        drawPowerStatusBar();
-        gfx->flush();
       }
+      if (bti != lastBtIcon || tick) {
+        lastBtIcon = bti;
+        ui_draw();
+      }
+      return;
     }
 
     static PowerStatus lastPs = (PowerStatus)-1;
@@ -857,14 +851,11 @@ void ui_handle_touch(int16_t x, int16_t y) {
       ui_draw();
       return;
     }
-    // App mode: only the resume button responds.
+    // App mode: no dedicated button anymore (release/resume both live on
+    // Settings) -- any tap on the screen resumes early.
     if (bluetti_release_remaining() > 0) {
-      int16_t rx, ry, rw, rh;
-      powerReleaseRect(rx, ry, rw, rh);
-      if (inRect(x, y, rx, ry, rw, rh)) {
-        bluetti_release(0);
-        ui_draw();
-      }
+      bluetti_release(0);
+      ui_draw();
       return;
     }
     if (pwrConfirm) {
@@ -884,16 +875,6 @@ void ui_handle_touch(int16_t x, int16_t y) {
         return;
       }
       return;  // swallow other taps while confirming
-    }
-    // History chart button (available even when the Bluetti is offline).
-    {
-      int16_t bx, by, bw, bh;
-      powerChartBtnRect(bx, by, bw, bh);
-      if (inRect(x, y, bx, by, bw, bh)) {
-        current = POWER_CHART;
-        ui_draw();
-        return;
-      }
     }
     // Output cards toggle their output (DC OUT = card 2, AC OUT = card 3).
     if (power_valid()) {
@@ -923,14 +904,6 @@ void ui_handle_touch(int16_t x, int16_t y) {
         return;
       }
     }
-    // Release the BLE link for the phone app (90s).
-    int16_t rx, ry, rw, rh;
-    powerReleaseRect(rx, ry, rw, rh);
-    if (inRect(x, y, rx, ry, rw, rh)) {
-      bluetti_release(90);
-      ui_draw();
-      return;
-    }
     return;
   }
 
@@ -959,9 +932,26 @@ void ui_handle_touch(int16_t x, int16_t y) {
     return;
   }
 
-  // Bluetti settings sub-page: toggles, charge-limit stepper, timeout cycle.
+  // Bluetti settings sub-page: history/release utility row, toggles,
+  // charge-limit stepper, timeout cycle.
   if (current == BT_SETTINGS) {
-    if (!power_valid()) return;  // controls disabled until live data arrives
+    // History + app-release: available regardless of connection state.
+    {
+      int16_t bx, by, bw, bh;
+      btChartBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        current = POWER_CHART;
+        ui_draw();
+        return;
+      }
+      btReleaseBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        bluetti_release(90);
+        ui_draw();
+        return;
+      }
+    }
+    if (!power_valid()) return;  // remaining controls disabled until live data arrives
     struct { int reg; bool *val; } rows[3] = {
         {2017, &power.acEco}, {2014, &power.dcEco}, {2021, &power.powerLift}};
     for (int i = 0; i < 3; i++) {

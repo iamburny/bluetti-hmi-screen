@@ -68,12 +68,15 @@ communicate through small C-style functions and shared structs, not classes.
   stays 320×480 / rotation 0); `SCREEN_ROTATION` in `display.h` (1 = landscape).
 - `touch.{h,cpp}` — AXS15231 cap-touch driven **directly over I2C @ 0x3B** (no
   touch library). Per-rotation coordinate transform mirrors `SCREEN_ROTATION`.
-- `ui.{h,cpp}` — screen-state machine: `POWER` (home screen — SoC gauge,
-  DC/AC in/out cards, output toggles, app-release button), `POWER_CHART`
-  (power-flow history), `BT_SETTINGS` (charge mode, ECO, charge limit, screen
-  timeout, BLE-MAC pairing). The Power screen carries its own slim status bar
-  (battery temperature, SoC fill, Bluetooth link icon, settings gear).
-  `theme.h` = shared palette.
+- `ui.{h,cpp}` — screen-state machine, full-height (no status bar): `POWER`
+  (home screen — SoC gauge, DC/AC in/out cards, output toggles, charge-mode
+  button), `POWER_CHART` (power-flow history), `BT_SETTINGS` (a top utility
+  row for history + app-release, always available regardless of connection
+  state, then ECO/charge-limit/screen-timeout/BLE-MAC pairing once live data
+  arrives). The settings gear sits in the gap between the AC IN and AC OUT
+  cards on the Power screen; a Bluetooth link icon (flashes while connecting)
+  only appears on the "Bluetti offline" state, since that's the only time
+  link status is otherwise invisible. `theme.h` = shared palette.
 - `bluetti.{h,cpp}` + `bluetti_crypt.{h,cpp}` — native BLE client + on-device
   decryption (see Bluetti section).
 - `power.{h,cpp}` — shared `PowerData` struct + `power_valid()` / `power_soc()`.

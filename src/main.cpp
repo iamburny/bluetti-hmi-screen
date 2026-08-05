@@ -61,6 +61,6 @@ void loop() {
   }
 
   powerlog_tick();  // capture a power sample when a fresh BLE poll arrives
-  ui_tick();        // refresh time-based UI (status bar, pending-write spinner)
+  ui_tick();        // refresh time-based UI (pending-write spinner, live data)
   delay(10);
 }

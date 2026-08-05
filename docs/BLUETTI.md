@@ -13,7 +13,10 @@ which uses hardcoded universal keys.
 
 ## Device / BLE
 
-- Advertised name: **`EL3002609112693584`** (prefix `EL300`); MAC `1c:db:d4:92:5b:aa`.
+- Advertised name: **`EL300` + the unit's serial number** (e.g.
+  `EL300<serial>`), so the firmware finds it by matching the `EL300` prefix —
+  see `DEVNAME_PREFIX` / `resolveAddr()` in `src/bluetti.cpp`. The BLE MAC is
+  per-unit; nothing device-specific is hardcoded.
 - Vendor GATT **service `0xFF00`**:
   - `0xFF01` — NOTIFY (device → app)
   - `0xFF02` — WRITE  (app → device)
@@ -166,7 +169,7 @@ windows: `0–19, 100–199, 700–759, 1100–1179, 1200–1339, 1400–1469, 1
 | Reg(s) | Field | Notes |
 |---|---|---|
 | 110–115 | Device type | swap-string = `EL300` |
-| **116–119** | **Serial number** | LE 16-bit words → `2609112693584`; matches advert `EL300`+serial. Mirrored at 1107–1109 |
+| **116–119** | **Serial number** | LE 16-bit words → the 13-digit serial; matches the advertised `EL300`+serial. Mirrored at 1107–1109 |
 | **1500** | **AC output frequency** | ×0.1 Hz — read 499 = 49.9 Hz (idle; strong candidate) |
 | 1155 / 2213 | Rated AC power | both = 2400 (W) |
 | **2083** | **Charge limit %** | high byte = percent (write `pct << 8`): 100 %=`0x6400`, 85 %=`0x5500`. The app's only charge-limit slider — confirmed by 100→85 diff |

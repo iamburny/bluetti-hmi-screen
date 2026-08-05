@@ -127,9 +127,29 @@ static void dropLink() {
   g_state = BTC_OFFLINE;
 }
 
-// Resolve the Elite 300's address: a saved MAC, else a 5s scan by name prefix.
+// Address learned from a scan, waiting to be persisted by the main loop.
+static char g_learnedMac[18] = "";
+static volatile bool g_haveLearned = false;
+
+// Consecutive failed connects. A saved MAC that stops working (unit swapped,
+// address changed, MAC typed in wrong) would otherwise wedge us permanently,
+// so after a few failures we ignore it and fall back to scanning -- which
+// re-learns the right address.
+static uint8_t g_connFails = 0;
+#define MAC_FALLBACK_FAILS 3
+
+bool bluetti_take_learned_mac(char *out, size_t n) {
+  if (!g_haveLearned || n == 0) return false;
+  strncpy(out, g_learnedMac, n - 1);
+  out[n - 1] = '\0';
+  g_haveLearned = false;  // one-shot
+  return true;
+}
+
+// Resolve the Elite 300's address: a saved MAC (fast), else a 5s scan by name
+// prefix, remembering what it finds so the next connect can skip the scan.
 static NimBLEAddress resolveAddr() {
-  if (strlen(settings.bluettiMac) >= 17)
+  if (strlen(settings.bluettiMac) >= 17 && g_connFails < MAC_FALLBACK_FAILS)
     return NimBLEAddress(std::string(settings.bluettiMac), BLE_ADDR_PUBLIC);
 
   NimBLEScan* scan = NimBLEDevice::getScan();
@@ -137,8 +157,18 @@ static NimBLEAddress resolveAddr() {
   NimBLEScanResults res = scan->getResults(5000, false);
   for (int i = 0; i < res.getCount(); i++) {
     const NimBLEAdvertisedDevice* d = res.getDevice(i);
-    if (String(d->getName().c_str()).startsWith(DEVNAME_PREFIX))
-      return d->getAddress();
+    if (String(d->getName().c_str()).startsWith(DEVNAME_PREFIX)) {
+      NimBLEAddress a = d->getAddress();
+      std::string s = a.toString();
+      // Offer it up for persisting, unless it's what we already have saved.
+      if (s.size() < sizeof(g_learnedMac) &&
+          strcmp(s.c_str(), settings.bluettiMac) != 0) {
+        strncpy(g_learnedMac, s.c_str(), sizeof(g_learnedMac) - 1);
+        g_learnedMac[sizeof(g_learnedMac) - 1] = '\0';
+        g_haveLearned = true;
+      }
+      return a;
+    }
   }
   return NimBLEAddress();
 }
@@ -218,7 +248,14 @@ static bool connectAndHandshake() {
 
 static bool ensureConnected() {
   if (g_client && g_client->isConnected() && g_crypt.isReady()) return true;
-  return connectAndHandshake();
+  bool ok = connectAndHandshake();
+  // Track consecutive failures in one place so resolveAddr() can decide when a
+  // saved MAC has gone stale and it should rescan instead.
+  if (ok)
+    g_connFails = 0;
+  else if (g_connFails < 255)
+    g_connFails++;
+  return ok;
 }
 
 // Read a register block (Modbus FC3); retries the request a few times because a

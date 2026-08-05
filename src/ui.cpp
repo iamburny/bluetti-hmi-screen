@@ -764,10 +764,11 @@ static void drawBtSettings() {
   snprintf(cl, sizeof(cl), "%d%%", power.chargeLimit);
   drawBtStepperRow(3, "Charge Limit", cl);
   drawBtValueRow(4, "Screen Timeout", btTimeoutLabel(power.screenTimeout));
-  // Tap opens the keyboard pre-filled with the actual MAC (or blank) for
-  // full editing; the row itself just shows Auto/Custom, matching the
-  // short-status-word style of the other value rows.
-  drawBtValueRow(5, "Pairing", strlen(settings.bluettiMac) ? "Custom" : "Auto");
+  // Tap opens the keyboard pre-filled with the actual MAC (or blank) for full
+  // editing. "Saved" rather than "Custom" because the address may have been
+  // learned automatically from a scan rather than typed in -- clearing it
+  // returns to scanning (and it'll simply re-learn on the next connect).
+  drawBtValueRow(5, "Pairing", strlen(settings.bluettiMac) ? "Saved" : "Scan");
   // Battery temp (reg 156) + AC output voltage/frequency, with a clear gap
   // below the last row so it doesn't crowd the Pairing row above it.
   char ac[56];

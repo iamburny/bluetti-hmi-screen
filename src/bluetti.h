@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cstddef>  // size_t
 
 // Native BLE client for the Bluetti Elite 300. Runs a background task that
 // periodically connects, performs the encrypted v2 handshake (bluetti_crypt),
@@ -19,6 +20,15 @@ void bluetti_write_reg(uint16_t addr, uint16_t val);
 // Release the BLE link for `seconds` so the Bluetti phone app can connect; the
 // HMI disconnects and stops polling until it expires. Call with 0 to resume now.
 void bluetti_release(uint32_t seconds);
+
+// One-shot: if the last connection was made by SCANNING (rather than from a
+// saved MAC), hand back the address that was found so the caller can persist
+// it -- subsequent connects then skip the ~5s scan. Returns false if there's
+// nothing new to save. Consumed on read.
+//
+// The caller persists rather than this module, deliberately: it keeps NVS
+// writes on the main thread instead of the BLE task.
+bool bluetti_take_learned_mac(char *out, size_t n);
 
 // Seconds remaining in the released ("app") window, or 0 if active/polling.
 uint32_t bluetti_release_remaining();

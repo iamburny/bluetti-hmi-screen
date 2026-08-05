@@ -32,6 +32,11 @@ void setup() {
   bluetti_begin();  // start the native Bluetti BLE telemetry task
   powerlog_init();  // PSRAM history ring + SD CSV log for the power chart
 
+  // Says whether we'll go straight to a known address or have to scan for it.
+  // Deliberately doesn't print the address itself.
+  Serial.printf("[hmi] Bluetti address: %s\n",
+                strlen(settings.bluettiMac) >= 17 ? "saved (skips scan)"
+                                                  : "none yet (will scan)");
   Serial.println("[hmi] ready");
 }
 
@@ -60,6 +65,18 @@ void loop() {
     // otherwise re-trigger and double-toggle.
     pressed = false;
     ui_handle_release(pressX, pressY, lastX, lastY);  // swipe detection
+  }
+
+  // If the BLE task discovered the Bluetti by scanning, persist the address so
+  // later connects skip the ~5s scan. Done here rather than in that task to
+  // keep NVS writes on a single thread.
+  char learnedMac[18];
+  if (bluetti_take_learned_mac(learnedMac, sizeof(learnedMac))) {
+    strncpy(settings.bluettiMac, learnedMac, sizeof(settings.bluettiMac) - 1);
+    settings.bluettiMac[sizeof(settings.bluettiMac) - 1] = '\0';
+    settings_save();
+    Serial.printf("[hmi] saved Bluetti address from scan: %s\n",
+                  settings.bluettiMac);
   }
 
   powerlog_tick();  // capture a power sample when a fresh BLE poll arrives

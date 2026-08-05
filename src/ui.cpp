@@ -149,7 +149,9 @@ static void powerCardRect(int idx, int16_t& x, int16_t& y, int16_t& w,
 }
 
 // One corner readout card: short bold label + big watt value. Output cards
-// (toggle 0/1) also get a state border + ON/OFF tag and act as on/off buttons.
+// (toggle 0/1) also get a state border + a bottom-left on-state dot (nothing
+// when off -- the border colour already carries that) and act as toggle
+// buttons.
 static void drawPowerCard(int idx, const char *label, int watts,
                           uint16_t labelCol, int toggle) {
   int16_t x, y, w, h;
@@ -170,9 +172,7 @@ static void drawPowerCard(int idx, const char *label, int watts,
   const int16_t numTop = y + 48 - numH / 2;  // center number block on y+48
   drawText(v, sx, numTop, 4, COL_TEXT);
   drawText("w", sx + numW + gap, numTop + numH - wH, 2, COL_MUTED);
-  if (toggle >= 0)
-    drawCenteredText(toggle ? "ON" : "OFF", x + w / 2, y + 71, 1,
-                     toggle ? COL_ON : COL_MUTED);
+  if (toggle == 1) gfx->fillCircle(x + 14, y + h - 10, 5, COL_ON);
 }
 
 // Small phone glyph for the app-release button.
@@ -330,7 +330,10 @@ static void drawPowerScreen() {
   const int16_t total = numW + gap + pctW;
   const int16_t x0 = cx - total / 2, numTop = cy - numH / 2;
   drawText(num, x0, numTop, 5, ringCol);
-  drawText("%", x0 + numW + gap, numTop, 2, ringCol);
+  // Vertically center the % against the number rather than top-aligning it --
+  // the bold digits are much taller than the old built-in font, so top-align
+  // left it floating up near the ring stroke instead of reading as a suffix.
+  drawText("%", x0 + numW + gap, numTop + (numH - pctH) / 2, 2, ringCol);
 
   // Remaining time (device estimate, reg 104) below the gauge — green when
   // charging, white when discharging.

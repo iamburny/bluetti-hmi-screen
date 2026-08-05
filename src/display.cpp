@@ -1,6 +1,7 @@
 #include "display.h"
 #include "fonts/FreeSans9pt7b.h"
 #include "fonts/FreeSans12pt7b.h"
+#include "fonts/FreeSans18pt7b.h"
 #include "fonts/FreeSansBold18pt7b.h"
 #include "fonts/FreeSansBold24pt7b.h"
 
@@ -41,17 +42,21 @@ void display_init() {
 void display_backlight(uint8_t level) { ledcWrite(GFX_BL, level); }
 
 // Maps the app's 1..5 size scale onto a small set of custom FreeSans fonts
-// instead of scaling the built-in glyphs. Size 5 additionally doubles the
-// biggest font via setTextSize() for extra visual weight on the headline
-// SoC %; every other size renders at its native point size.
+// instead of scaling the built-in glyphs. Size 5 (the headline SoC %) is the
+// only bold-24pt user -- doubling it overflowed the gauge ring ("100%" would
+// measure ~156px against the ring's ~124px clear diameter), so it renders at
+// native (1x) size, same as size 4's font used to. Size 4 (card watt values)
+// is regular-weight 18pt rather than bold-24pt: smaller and lighter so it
+// doesn't crowd the card title above it.
 static void applyTextSize(uint8_t size) {
   switch (size) {
-    case 1: gfx->setFont(&FreeSans9pt7b); gfx->setTextSize(1); break;
-    case 2: gfx->setFont(&FreeSans12pt7b); gfx->setTextSize(1); break;
-    case 3: gfx->setFont(&FreeSansBold18pt7b); gfx->setTextSize(1); break;
-    case 4: gfx->setFont(&FreeSansBold24pt7b); gfx->setTextSize(1); break;
-    default: gfx->setFont(&FreeSansBold24pt7b); gfx->setTextSize(2); break;
+    case 1: gfx->setFont(&FreeSans9pt7b); break;
+    case 2: gfx->setFont(&FreeSans12pt7b); break;
+    case 3: gfx->setFont(&FreeSansBold18pt7b); break;
+    case 4: gfx->setFont(&FreeSans18pt7b); break;
+    default: gfx->setFont(&FreeSansBold24pt7b); break;  // 5+
   }
+  gfx->setTextSize(1);
 }
 
 void drawCenteredText(const char *s, int16_t cx, int16_t cy, uint8_t size,

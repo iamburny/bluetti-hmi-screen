@@ -158,15 +158,18 @@ static void drawPowerCard(int idx, const char *label, int watts,
   if (toggle >= 0)
     gfx->drawRoundRect(x, y, w, h, 10, toggle ? COL_ON : COL_MUTED);
   drawCenteredText(label, x + w / 2, y + 18, 2, labelCol);  // larger label
-  // Big watt value with a small trailing "w".
+  // Big watt value with a small trailing "w". FreeSans is proportional, not
+  // monospace, so measure both pieces rather than guessing glyph widths.
   char v[8];
   snprintf(v, sizeof(v), "%d", watts);
-  const int16_t numW = (int16_t)strlen(v) * 6 * 4;  // size-4 glyphs are 6px
-  const int16_t wW = 6 * 2, gap = 2;
+  int16_t numW, numH, wW, wH;
+  measureText(v, 4, numW, numH);
+  measureText("w", 2, wW, wH);
+  const int16_t gap = 2;
   const int16_t sx = x + w / 2 - (numW + gap + wW) / 2;
-  const int16_t numTop = y + 48 - (8 * 4) / 2;  // center number block on y+48
+  const int16_t numTop = y + 48 - numH / 2;  // center number block on y+48
   drawText(v, sx, numTop, 4, COL_TEXT);
-  drawText("w", sx + numW + gap, numTop + 8 * 4 - 8 * 2, 2, COL_MUTED);
+  drawText("w", sx + numW + gap, numTop + numH - wH, 2, COL_MUTED);
   if (toggle >= 0)
     drawCenteredText(toggle ? "ON" : "OFF", x + w / 2, y + 71, 1,
                      toggle ? COL_ON : COL_MUTED);
@@ -316,13 +319,16 @@ static void drawPowerScreen() {
   uint16_t ringCol = power.soc <= 15 ? COL_WARN : IN_COL;
   drawGaugeRing(cx, cy, rOuter, thick, power.soc / 100.0f, ringCol, TRACK);
 
-  // Big SoC number with a small superscript %.
+  // Big SoC number with a small superscript %. FreeSans is proportional, not
+  // monospace, so measure both pieces rather than guessing glyph widths.
   char num[6];
   snprintf(num, sizeof(num), "%d", power.soc);
-  const int16_t numW = (int16_t)strlen(num) * 6 * 5;  // size-5 glyphs are 6px
-  const int16_t pctW = 6 * 2, gap = 6;
+  int16_t numW, numH, pctW, pctH;
+  measureText(num, 5, numW, numH);
+  measureText("%", 2, pctW, pctH);
+  const int16_t gap = 6;
   const int16_t total = numW + gap + pctW;
-  const int16_t x0 = cx - total / 2, numTop = cy - (8 * 5) / 2;
+  const int16_t x0 = cx - total / 2, numTop = cy - numH / 2;
   drawText(num, x0, numTop, 5, ringCol);
   drawText("%", x0 + numW + gap, numTop, 2, ringCol);
 

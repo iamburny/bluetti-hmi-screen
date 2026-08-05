@@ -296,9 +296,6 @@ static void drawChargeModeButton() {
 static void drawPowerScreen() {
   const int16_t W = gfx->width(), H = gfx->height();
   gfx->fillScreen(COL_BG);
-  // Settings gear -- drawn unconditionally (before the early returns below)
-  // so it's reachable regardless of connection state.
-  drawGearButton();
 
   const uint16_t IN_COL = RGB565(0, 176, 255);    // inputs: cyan/blue
   const uint16_t OUT_COL = RGB565(255, 150, 40);  // outputs: amber
@@ -334,6 +331,11 @@ static void drawPowerScreen() {
     return;
   }
 
+  // Settings gear -- only once live data has arrived. Everything the gear
+  // leads to needs a working link (the settings rows are gated on
+  // power_valid() anyway), so it's just a dead end on the offline screen.
+  drawGearButton();
+
   // Four corner cards; the two OUTPUT cards double as on/off toggles.
   drawPowerCard(0, "DC IN", power.dcInW, IN_COL, power.dcInW > 0 ? 2 : -1);
   drawPowerCard(1, "AC IN", power.acInW, IN_COL, power.acInW > 0 ? 2 : -1);
@@ -354,16 +356,16 @@ static void drawPowerScreen() {
     const char *stateText;
     uint16_t stateColor;
     if (power.charging) {
-      stateText = "Charging";
+      stateText = "CHARGING";
       stateColor = pulseColor(COL_ON);
     } else if (power.dcOutW + power.acOutW > power.dcInW + power.acInW) {
-      stateText = "Discharging";
+      stateText = "DISCHARGING";
       stateColor = OUT_COL;
     } else {
-      stateText = "Idle";
+      stateText = "IDLE";
       stateColor = COL_MUTED;
     }
-    drawCenteredText(stateText, W / 2, 20, 2, stateColor);
+    drawCenteredText(stateText, W / 2, 18, 1, stateColor);
   }
 
   // Battery-temperature warning: only shown once it crosses 32C (no
@@ -394,6 +396,17 @@ static void drawPowerScreen() {
   // the bold digits are much taller than the old built-in font, so top-align
   // left it floating up near the ring stroke instead of reading as a suffix.
   drawText("%", x0 + numW + gap, numTop + (numH - pctH) / 2, 2, ringCol);
+
+  // Net battery power (reg 148, signed): one figure for what the battery is
+  // actually doing, rather than making you subtract the four corner cards.
+  // Device convention kept as-is -- negative = charging into the battery,
+  // positive = discharging out of it. See power.h / docs/BLUETTI.md.
+  if (power.netBatteryW != 0) {
+    char nb[16];
+    snprintf(nb, sizeof(nb), "%+d W", power.netBatteryW);
+    drawCenteredText(nb, cx, cy + 40, 2,
+                     power.netBatteryW < 0 ? COL_ON : OUT_COL);
+  }
 
   // Remaining time (device estimate, reg 104) below the gauge — green when
   // charging, white when discharging.
@@ -435,8 +448,15 @@ static void drawPowerScreen() {
 #define SOC_SERIES 4
 #define TEMP_SERIES 5
 #define TEMP_SCALE_MAX 50
-static const uint16_t SERIES_COL[NSER] = {COL_ON,      ACC_WEATHER, ACC_LIGHTS,
-                                          ACC_WATER,   ACC_SETTINGS, COL_WARN};
+// AC Out was ACC_WATER (82,138,255) which is near-indistinguishable from AC
+// In's ACC_WEATHER (90,178,255) -- both mid blues. Given a green, an amber, a
+// lilac and a red are already spoken for, magenta is the remaining clearly
+// separable hue, and it keeps the "outputs are warm" reading alongside DC
+// Out's amber.
+#define CHART_ACOUT_COL RGB565(255, 105, 180)  // magenta
+static const uint16_t SERIES_COL[NSER] = {COL_ON,          ACC_WEATHER,
+                                          ACC_LIGHTS,      CHART_ACOUT_COL,
+                                          ACC_SETTINGS,    COL_WARN};
 static const char *SERIES_LBL[NSER] = {"Solar", "AC In", "DC Out", "AC Out",
                                        "SoC",   "Temp"};
 static const char *CHART_WIN_LBL[3] = {"1h", "6h", "24h"};
@@ -983,7 +1003,9 @@ void ui_handle_touch(int16_t x, int16_t y) {
   if (current == POWER) {
     // Settings gear: latch the press only. A tap opens Bluetti Settings on
     // release; a ~800ms hold opens Diagnostics (see ui_handle_drag/release).
-    if (inRect(x, y, gearX, gearY, gearW, gearH)) {
+    // Gated on power_valid() to match where the button is actually drawn --
+    // otherwise this is an invisible tap target on the offline screen.
+    if (power_valid() && inRect(x, y, gearX, gearY, gearW, gearH)) {
       gearPending = true;
       gearPressMs = millis();
       return;

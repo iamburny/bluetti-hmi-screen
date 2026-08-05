@@ -22,14 +22,36 @@ static const uint16_t SVC_UUID = 0xFF00;
 static const uint16_t NOTIFY_UUID = 0xFF01;  // device -> app
 static const uint16_t WRITE_UUID = 0xFF02;   // app -> device
 
-// Refresh period while connected. ~15 register reads/poll at ~100-150ms each
-// (40ms BLE_GAP_MS + notify round-trip) costs ~1.5-2.25s active time, so 3s
-// leaves comfortable slack for the occasional retry while updating far more
-// often than the old 15s. No WiFi/BLE coexistence to worry about in this
-// build (BLE has the radio to itself), so there's no reason to poll slower.
-#define POLL_MS 3000
+// Refresh period while connected -- runtime-adjustable so it can be tuned
+// against the link-health counters on the Diagnostics page (see bluetti.h).
+// NOTE the real limit is the poll DURATION (~17 sequential reads, each a 40ms
+// BLE_GAP_MS plus a notify round-trip, so ~1.5-2.5s); setting the interval
+// below that just polls back-to-back rather than going faster.
+#define POLL_MS_DEFAULT 3000
+#define POLL_MS_MIN 250
+#define POLL_MS_MAX 30000
+static volatile uint32_t g_pollMs = POLL_MS_DEFAULT;
+
 #define RETRY_MS 4000   // retry period after a failure / reconnect
 #define DEVNAME_PREFIX "EL300"
+
+// Link-health counters (see bluetti.h). Written only by the BLE task.
+static BluettiStats g_stats = {};
+static uint16_t g_pollReads = 0, g_pollRetries = 0, g_pollFailures = 0;
+
+const BluettiStats &bluetti_stats() { return g_stats; }
+uint32_t bluetti_poll_ms() { return g_pollMs; }
+
+void bluetti_stats_reset() {
+  g_stats.polls = g_stats.retries = g_stats.failures = g_stats.linkDrops = 0;
+  g_stats.avgPollMs = 0;
+}
+
+void bluetti_set_poll_ms(uint32_t ms) {
+  if (ms < POLL_MS_MIN) ms = POLL_MS_MIN;
+  if (ms > POLL_MS_MAX) ms = POLL_MS_MAX;
+  g_pollMs = ms;
+}
 
 static const uint16_t REG_CTRL_AC = 2011;
 static const uint16_t REG_CTRL_DC = 2012;
@@ -178,19 +200,36 @@ static bool ensureConnected() {
 }
 
 // Read a register block (Modbus FC3); retries the request a few times because a
-// single notification can be lost under WiFi/BLE coexistence. Returns the word
-// count placed in out[], or -1.
-// Small gap before each BLE command. Spacing transactions improves reliability
-// with the Elite 300 under WiFi/BLE coexistence (also noticeably fewer connect
-// retries).
-#define BLE_GAP_MS 40
+// single notification can be lost. Returns the word count placed in out[], or -1.
+//
+// Small gap before each BLE command: the Elite 300 is unreliable with
+// back-to-back commands, and spacing them also cut connect retries. But it is
+// the DOMINANT cost of a poll -- measured 17 reads in ~1020-1320ms total, of
+// which 40ms x 17 = 680ms is this delay alone. So it's runtime-tunable
+// alongside the poll interval; lowering it is the only way past the ~1.1s
+// floor without cutting reads. Watch the retry/failure counters when you do.
+#define BLE_GAP_MS_DEFAULT 40
+#define BLE_GAP_MS_MIN 0
+#define BLE_GAP_MS_MAX 80
+static volatile uint32_t g_gapMs = BLE_GAP_MS_DEFAULT;
+
+uint32_t bluetti_gap_ms() { return g_gapMs; }
+void bluetti_set_gap_ms(uint32_t ms) {
+  if (ms > BLE_GAP_MS_MAX) ms = BLE_GAP_MS_MAX;
+  g_gapMs = ms;
+}
 
 static int readRegs(uint16_t addr, uint16_t qty, uint16_t* out, int maxw) {
   if (!g_wr) return -1;
-  vTaskDelay(BLE_GAP_MS / portTICK_PERIOD_MS);
+  g_pollReads++;
+  if (g_gapMs) vTaskDelay(g_gapMs / portTICK_PERIOD_MS);
   for (int attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {  // this read needed more than one go
+      g_pollRetries++;
+      g_stats.retries++;
+    }
     std::vector<uint8_t> cmd = g_crypt.readCommand(addr, qty);
-    if (cmd.empty()) return -1;
+    if (cmd.empty()) break;
     drainQueue();
     if (!g_wr->writeValue(cmd.data(), cmd.size(), true)) continue;
     uint32_t t0 = millis();
@@ -203,6 +242,8 @@ static int readRegs(uint16_t addr, uint16_t qty, uint16_t* out, int maxw) {
       if (words >= 0) return words;  // valid, matching FC3 response
     }
   }
+  g_pollFailures++;
+  g_stats.failures++;
   BDBG("[bluetti] read %u: no response\n", addr);
   return -1;
 }
@@ -219,7 +260,9 @@ static bool writeReg(uint16_t addr, uint16_t val) {
   for (int attempt = 0; attempt < 2; attempt++) {
     std::vector<uint8_t> cmd = g_crypt.writeCommand(addr, val);
     if (cmd.empty()) return false;
-    vTaskDelay(BLE_GAP_MS / portTICK_PERIOD_MS);
+    // Writes always keep the full default gap -- they're rare, user-initiated,
+    // and must not fail, so they don't ride the tuned-down read gap.
+    vTaskDelay(BLE_GAP_MS_DEFAULT / portTICK_PERIOD_MS);
     drainQueue();
     if (!g_wr->writeValue(cmd.data(), cmd.size(), true)) continue;
     // Consume the echo (receipt ack); the value commits a fraction of a second
@@ -373,8 +416,14 @@ static bool poll() {
   tmp.status = PWR_OK;
   uint16_t w[8];
 
+  // Time the telemetry reads (the tuning-relevant part -- queued writes above
+  // are user-initiated and would skew the figure).
+  uint32_t pollT0 = millis();
+  g_pollReads = g_pollRetries = g_pollFailures = 0;
+
   if (readRegs(102, 1, w, 1) != 1) {
     BDBG("[bluetti] SoC read failed; dropping link\n");
+    g_stats.linkDrops++;
     dropLink();  // force a fresh connection next cycle
     return false;
   }
@@ -411,9 +460,22 @@ static bool poll() {
   power = tmp;
   portEXIT_CRITICAL(&g_mux);
   g_state = BTC_ONLINE;  // got real data — now the link is "online" to the UI
-  BDBG("[bluetti] SoC=%d%% DCout=%d ACout=%d DCin=%d ACin=%d AC%s DC%s\n",
+
+  // Record this poll's cost + error counts for the Diagnostics page.
+  g_stats.lastPollMs = millis() - pollT0;
+  g_stats.lastReads = g_pollReads;
+  g_stats.lastRetries = g_pollRetries;
+  g_stats.lastFailures = g_pollFailures;
+  g_stats.polls++;
+  g_stats.avgPollMs = g_stats.avgPollMs
+                          ? (g_stats.avgPollMs * 7 + g_stats.lastPollMs) / 8
+                          : g_stats.lastPollMs;
+
+  BDBG("[bluetti] SoC=%d%% DCout=%d ACout=%d DCin=%d ACin=%d AC%s DC%s "
+       "poll=%lums r=%u/%u\n",
                 tmp.soc, tmp.dcOutW, tmp.acOutW, tmp.dcInW, tmp.acInW,
-                tmp.acOn ? "on" : "off", tmp.dcOn ? "on" : "off");
+                tmp.acOn ? "on" : "off", tmp.dcOn ? "on" : "off",
+                (unsigned long)g_stats.lastPollMs, g_pollRetries, g_pollReads);
   // Diagnostics sweep (only while the Diagnostics page is open -- it's slow).
   if (g_diagOn) diagScan();
   return true;
@@ -423,7 +485,7 @@ static void bluettiTask(void*) {
   for (;;) {
     bool ok = poll();
     // Sleep until the next refresh, or wake early when a write is requested.
-    xSemaphoreTake(g_wake, (ok ? POLL_MS : RETRY_MS) / portTICK_PERIOD_MS);
+    xSemaphoreTake(g_wake, (ok ? g_pollMs : RETRY_MS) / portTICK_PERIOD_MS);
   }
 }
 

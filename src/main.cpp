@@ -27,6 +27,8 @@ void setup() {
   display_init();
   ui_init();        // draw UI first so it shows even if touch init misbehaves
   touch_init();
+  bluetti_set_poll_ms(settings.pollMs);  // tuned rate from NVS, before the task starts
+  bluetti_set_gap_ms(settings.gapMs);
   bluetti_begin();  // start the native Bluetti BLE telemetry task
   powerlog_init();  // PSRAM history ring + SD CSV log for the power chart
 

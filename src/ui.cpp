@@ -754,35 +754,117 @@ static void drawBtSettings() {
 }
 
 // ===== Diagnostics page (hidden: long-press the gear) ======================
-// Live register change detector, built to hunt the cooling-fan register after
-// two offline sweep campaigns came up empty (see docs/BLUETTI.md). The BLE
-// task sweeps all 940 readable registers after each poll and reports any that
-// moved; known continuously-drifting registers are filtered out in
-// bluetti.cpp so a real state flip stands out. Tap = re-baseline.
+// Two jobs on one page:
+//  1. LINK HEALTH + poll-rate tuning. The refresh rate is bounded by how long
+//     a poll takes, not by the interval, so the measured duration plus the
+//     retry/failure/drop counts are what tell you whether a faster interval is
+//     actually holding up. Dial the interval down a step at a time and watch
+//     those counters; when they climb, back off.
+//  2. REGISTER CHANGE DETECTION (opt-in). Off by default -- a sweep is ~940
+//     registers and would completely distort the poll timings above.
+static const int16_t DIAG_STEP = 30;
+static void diagPollStepRects(int16_t &minusX, int16_t &plusX, int16_t &y,
+                              int16_t &s) {
+  s = DIAG_STEP;
+  y = 30;
+  minusX = 150;
+  plusX = minusX + s + 78;  // value sits between the two buttons
+}
+static void diagGapStepRects(int16_t &minusX, int16_t &plusX, int16_t &y,
+                             int16_t &s) {
+  s = DIAG_STEP;
+  y = 66;
+  minusX = 150;
+  plusX = minusX + s + 78;
+}
+static void diagSweepBtnRect(int16_t &x, int16_t &y, int16_t &w, int16_t &h) {
+  w = 92; h = 26; y = 28;
+  x = gfx->width() - w - 10;
+}
+
 static void drawDiagnostics() {
   const int16_t W = gfx->width(), H = gfx->height();
+  const BluettiStats &st = bluetti_stats();
   gfx->fillScreen(COL_BG);
-  drawText("Diagnostics - register changes", 8, 8, 1, COL_MUTED);
+  drawText("DIAGNOSTICS", 8, 8, 1, COL_MUTED);
+
+  // --- Poll interval stepper -------------------------------------------------
+  drawText("Poll interval", 8, 38, 1, COL_TEXT);
+  int16_t mX, pX, sy, ss;
+  diagPollStepRects(mX, pX, sy, ss);
+  gfx->fillRoundRect(mX, sy, ss, ss, 6, COL_TILE_DN);
+  drawCenteredText("-", mX + ss / 2, sy + ss / 2 - 1, 3, COL_TEXT);
+  gfx->fillRoundRect(pX, sy, ss, ss, 6, COL_TILE_DN);
+  drawCenteredText("+", pX + ss / 2, sy + ss / 2 - 1, 3, COL_TEXT);
+  char pm[16];
+  snprintf(pm, sizeof(pm), "%lu ms", (unsigned long)bluetti_poll_ms());
+  drawCenteredText(pm, (mX + ss + pX) / 2, sy + ss / 2, 2, COL_TEXT);
+
+  // --- Inter-command gap stepper (the dominant slice of a poll) -------------
+  drawText("Cmd gap", 8, 74, 1, COL_TEXT);
+  int16_t gmX, gpX, gy, gs;
+  diagGapStepRects(gmX, gpX, gy, gs);
+  gfx->fillRoundRect(gmX, gy, gs, gs, 6, COL_TILE_DN);
+  drawCenteredText("-", gmX + gs / 2, gy + gs / 2 - 1, 3, COL_TEXT);
+  gfx->fillRoundRect(gpX, gy, gs, gs, 6, COL_TILE_DN);
+  drawCenteredText("+", gpX + gs / 2, gy + gs / 2 - 1, 3, COL_TEXT);
+  char gm[16];
+  snprintf(gm, sizeof(gm), "%lu ms", (unsigned long)bluetti_gap_ms());
+  drawCenteredText(gm, (gmX + gs + gpX) / 2, gy + gs / 2, 2, COL_TEXT);
+
+  // --- Register-sweep toggle ------------------------------------------------
+  int16_t bx, by, bw, bh;
+  diagSweepBtnRect(bx, by, bw, bh);
+  bool sweepOn = bluetti_diag_enabled();
+  gfx->fillRoundRect(bx, by, bw, bh, 6, sweepOn ? COL_ON : COL_OFF);
+  drawCenteredText(sweepOn ? "SWEEP ON" : "SWEEP OFF", bx + bw / 2,
+                   by + bh / 2, 1, COL_BG);
+
+  // --- Link health ---------------------------------------------------------
+  // A poll duration at or above the interval means it's running back-to-back
+  // and the interval is no longer the limiting factor -- flag that in amber.
+  bool saturated = st.lastPollMs >= bluetti_poll_ms();
+  char l1[72], l2[72], l3[72];
+  snprintf(l1, sizeof(l1), "poll %lu ms   avg %lu ms%s",
+           (unsigned long)st.lastPollMs, (unsigned long)st.avgPollMs,
+           saturated ? "   (saturated)" : "");
+  snprintf(l2, sizeof(l2), "reads %u   retries %u   fails %u   (last poll)",
+           st.lastReads, st.lastRetries, st.lastFailures);
+  snprintf(l3, sizeof(l3), "polls %lu   retries %lu   fails %lu   drops %lu",
+           (unsigned long)st.polls, (unsigned long)st.retries,
+           (unsigned long)st.failures, (unsigned long)st.linkDrops);
+  drawText(l1, 8, 110, 1, saturated ? ACC_LIGHTS : COL_TEXT);
+  drawText(l2, 8, 128, 1, st.lastRetries || st.lastFailures ? COL_WARN : COL_TEXT);
+  drawText(l3, 8, 146, 1, st.linkDrops ? COL_WARN : COL_MUTED);
+
+  gfx->drawFastHLine(8, 162, W - 16, COL_TILE);
+  drawText("tap = reset counters    swipe right = back", 8, H - 14, 1, COL_OFF);
+
+  // --- Register changes (only meaningful with the sweep on) ----------------
+  if (!sweepOn) {
+    drawCenteredText("Register sweep off - timings above are clean", W / 2, 196,
+                     1, COL_MUTED);
+    drawCenteredText("Turn it on to hunt a register (distorts timings)", W / 2,
+                     214, 1, COL_OFF);
+    return;
+  }
 
   char hdr[64];
-  snprintf(hdr, sizeof(hdr), "%d regs in %lums   %d change%s", bluetti_diag_scanned(),
-           (unsigned long)bluetti_diag_scan_ms(), bluetti_diag_count(),
-           bluetti_diag_count() == 1 ? "" : "s");
-  drawText(hdr, 8, 24, 1, COL_TEXT);
-  drawText("tap = re-baseline    swipe right = back", 8, H - 14, 1, COL_OFF);
+  snprintf(hdr, sizeof(hdr), "%d regs / %lums sweep   %d change%s",
+           bluetti_diag_scanned(), (unsigned long)bluetti_diag_scan_ms(),
+           bluetti_diag_count(), bluetti_diag_count() == 1 ? "" : "s");
+  drawText(hdr, 8, 172, 1, COL_TEXT);
 
   int n = bluetti_diag_count();
   if (n == 0) {
     drawCenteredText(bluetti_diag_scanned() ? "No changes since baseline"
                                             : "Scanning...",
-                     W / 2, H / 2 - 8, 2, COL_MUTED);
-    drawCenteredText("Trigger the event now (e.g. wait for the fan)", W / 2,
-                     H / 2 + 18, 1, COL_OFF);
+                     W / 2, 210, 2, COL_MUTED);
     return;
   }
 
   // Two columns of changes, newest first.
-  const int16_t rowH = 20, top = 44, perCol = 11;
+  const int16_t rowH = 18, top = 190, perCol = 6;
   if (n > perCol * 2) n = perCol * 2;
   for (int i = 0; i < n; i++) {
     const RegChange &c = bluetti_diag_at(i);
@@ -793,8 +875,7 @@ static void drawDiagnostics() {
     // Newest few highlighted -- they're the ones tied to what just happened.
     drawText(line, x, y, 1, i < 3 ? COL_ON : COL_TEXT);
     char ago[12];
-    uint32_t secs = (millis() - c.atMs) / 1000;
-    snprintf(ago, sizeof(ago), "%lus", (unsigned long)secs);
+    snprintf(ago, sizeof(ago), "%lus", (unsigned long)((millis() - c.atMs) / 1000));
     drawText(ago, x + 150, y, 1, COL_OFF);
   }
 }
@@ -946,15 +1027,18 @@ void ui_tick() {
     return;
   }
 
-  // Diagnostics: repaint whenever a sweep finishes or a change is recorded.
+  // Diagnostics: repaint on each completed poll (so the health figures are
+  // live), and whenever a sweep finishes or a change is recorded.
   if (current == DIAGNOSTICS) {
     static int lastDiagCount = -1;
-    static uint32_t lastDiagScan = 0;
+    static uint32_t lastDiagScan = 0, lastPolls = 0;
     int c = bluetti_diag_count();
     uint32_t sm = bluetti_diag_scan_ms();
-    if (c != lastDiagCount || sm != lastDiagScan) {
+    uint32_t np = bluetti_stats().polls;
+    if (c != lastDiagCount || sm != lastDiagScan || np != lastPolls) {
       lastDiagCount = c;
       lastDiagScan = sm;
+      lastPolls = np;
       ui_draw();
     }
     return;
@@ -1159,8 +1243,59 @@ void ui_handle_touch(int16_t x, int16_t y) {
     return;
   }
 
-  // Diagnostics: any tap re-baselines the change detector.
+  // Diagnostics: poll-interval steppers, sweep toggle, else reset counters.
   if (current == DIAGNOSTICS) {
+    // Poll interval -- steps chosen to bracket the ~2s poll duration so the
+    // saturation point is easy to walk up to and back off from.
+    static const uint16_t STEPS[] = {250,  500,  750,  1000, 1500,
+                                     2000, 3000, 5000, 10000};
+    static const int NSTEPS = sizeof(STEPS) / sizeof(STEPS[0]);
+    int16_t mX, pX, sy, ss;
+    diagPollStepRects(mX, pX, sy, ss);
+    bool hitMinus = inRect(x, y, mX, sy, ss, ss);
+    bool hitPlus = inRect(x, y, pX, sy, ss, ss);
+    if (hitMinus || hitPlus) {
+      uint32_t cur = bluetti_poll_ms();
+      int i = 0;  // nearest current step
+      while (i < NSTEPS - 1 && STEPS[i] < cur) i++;
+      i += hitPlus ? 1 : -1;
+      if (i < 0) i = 0;
+      if (i > NSTEPS - 1) i = NSTEPS - 1;
+      bluetti_set_poll_ms(STEPS[i]);
+      settings.pollMs = STEPS[i];
+      settings_save();
+      bluetti_stats_reset();  // judge the new rate on its own numbers
+      ui_draw();
+      return;
+    }
+    // Inter-command gap -- 5ms steps. This is ~2/3 of a poll's cost, so it's
+    // the lever that actually gets under the ~1.1s floor.
+    int16_t gmX, gpX, gy, gs;
+    diagGapStepRects(gmX, gpX, gy, gs);
+    bool gMinus = inRect(x, y, gmX, gy, gs, gs);
+    bool gPlus = inRect(x, y, gpX, gy, gs, gs);
+    if (gMinus || gPlus) {
+      int g = (int)bluetti_gap_ms() + (gPlus ? 5 : -5);
+      if (g < 0) g = 0;
+      if (g > 80) g = 80;
+      bluetti_set_gap_ms(g);
+      settings.gapMs = (uint8_t)g;
+      settings_save();
+      bluetti_stats_reset();
+      ui_draw();
+      return;
+    }
+    int16_t bx, by, bw, bh;
+    diagSweepBtnRect(bx, by, bw, bh);
+    if (inRect(x, y, bx, by, bw, bh)) {
+      bool on = !bluetti_diag_enabled();
+      bluetti_diag_enable(on);
+      if (on) bluetti_diag_reset();
+      ui_draw();
+      return;
+    }
+    // Anywhere else: reset both the health counters and the change baseline.
+    bluetti_stats_reset();
     bluetti_diag_reset();
     ui_draw();
     return;

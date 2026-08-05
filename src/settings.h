@@ -4,8 +4,10 @@
 // Persisted device configuration (stored in NVS via Preferences).
 struct Settings {
   char bluettiMac[18];  // Elite 300 BLE MAC "aa:bb:..", "" = auto-discover by name
-  uint8_t chartSeriesMask;  // power-chart trace visibility, bit0..4 (default 0x1F)
+  uint8_t chartSeriesMask;  // power-chart trace visibility, bit0..5 (default 0x3F)
   uint8_t chartWindow;      // power-chart X span: 0=1h, 1=6h, 2=24h
+  uint16_t pollMs;          // BLE poll interval, ms (tunable on the Diagnostics page)
+  uint8_t gapMs;            // BLE inter-command gap, ms (ditto; dominates poll cost)
 };
 
 extern Settings settings;

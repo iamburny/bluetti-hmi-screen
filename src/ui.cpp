@@ -42,19 +42,27 @@ static void iconGear(int16_t cx, int16_t cy, uint16_t c) {
   gfx->fillCircle(cx, cy, 3, COL_BAR);
 }
 
+// Settings-gear button, styled like the charge-mode button (same tile/border
+// treatment) so it reads as a peer control rather than a bare icon.
+static void drawGearButton() {
+  gfx->fillRoundRect(gearX, gearY, gearW, gearH, 8, COL_TILE);
+  gfx->drawRoundRect(gearX, gearY, gearW, gearH, 8, COL_MUTED);
+  iconGear(gearX + gearW / 2, gearY + gearH / 2, COL_TEXT);
+}
+
 // ===== Layout ===============================================================
 static void layout() {
   const int16_t W = gfx->width(), H = gfx->height();
   const int16_t margin = 12;
 
-  // Settings gear: no status bar to anchor it to anymore, so it sits in the
-  // empty gap between the AC IN (top) and AC OUT (bottom) cards, right-hand
-  // side. Matches powerCardRect's own geometry (m=10, card 140x80).
-  const int16_t cardM = 10, cardW = 140, cardH = 80;
-  const int16_t gapCx = W - cardM - cardW / 2;
+  // Settings gear: no status bar to anchor it to anymore. Drawn as a button
+  // (50x42, matching PWR_BTN_W/PWR_BTN_H) right-aligned with the cards'
+  // right edge, vertically centered in the gap between AC IN and AC OUT.
+  // Matches powerCardRect's own geometry (m=10, card 140x80).
+  const int16_t cardM = 10, cardH = 80;
   const int16_t gapTop = cardM + cardH, gapBot = H - cardM - cardH;
-  gearW = gearH = 44;
-  gearX = gapCx - gearW / 2;
+  gearW = 50; gearH = 42;
+  gearX = W - cardM - gearW;
   gearY = (gapTop + gapBot) / 2 - gearH / 2;
 
   // Bluetti-settings list rows — compact pitch to fit a top utility row
@@ -72,8 +80,8 @@ static void layout() {
 // icon is only useful while there's no live data to show yet, so it lives on
 // the "Bluetti offline" screen instead of a bar every screen has to carry.
 static uint8_t btAnimPhase = 0;  // toggles while connecting to the Bluetti
-static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c) {
-  const int16_t h = 7, w = 4, q = 3;
+static void iconBluetooth(int16_t cx, int16_t cy, uint16_t c, uint8_t scale = 1) {
+  const int16_t h = 7 * scale, w = 4 * scale, q = 3 * scale;
   gfx->drawLine(cx, cy - h, cx, cy + h, c);         // spine
   gfx->drawLine(cx, cy - h, cx + w, cy - q, c);     // top tip -> upper right
   gfx->drawLine(cx, cy + h, cx + w, cy + q, c);     // bottom tip -> lower right
@@ -117,17 +125,19 @@ static void powerCardRect(int idx, int16_t& x, int16_t& y, int16_t& w,
   y = (idx < 2) ? m : (H - m - h);  // no status bar -- top cards sit at the margin
 }
 
-// One corner readout card: short bold label + big watt value. Output cards
-// (toggle 0/1) also get a state border + a bottom-left on-state dot (nothing
-// when off -- the border colour already carries that) and act as toggle
-// buttons.
+// One corner readout card: short bold label + big watt value.
+// `toggle`: -1 = no border (inactive input), 0 = off (grey border, output
+// card), 1 = on (green border + bottom-left dot, output card, tappable),
+// 2 = active (green border, no dot -- input card currently receiving power).
 static void drawPowerCard(int idx, const char *label, int watts,
                           uint16_t labelCol, int toggle) {
   int16_t x, y, w, h;
   powerCardRect(idx, x, y, w, h);
   gfx->fillRoundRect(x, y, w, h, 10, COL_TILE);
-  if (toggle >= 0)
-    gfx->drawRoundRect(x, y, w, h, 10, toggle ? COL_ON : COL_MUTED);
+  if (toggle == 1 || toggle == 2)
+    gfx->drawRoundRect(x, y, w, h, 10, COL_ON);
+  else if (toggle == 0)
+    gfx->drawRoundRect(x, y, w, h, 10, COL_MUTED);
   drawCenteredText(label, x + w / 2, y + 18, 2, labelCol);  // larger label
   // Big watt value with a small trailing "w". FreeSans is proportional, not
   // monospace, so measure both pieces rather than guessing glyph widths.
@@ -257,7 +267,7 @@ static void drawPowerScreen() {
   gfx->fillScreen(COL_BG);
   // Settings gear -- drawn unconditionally (before the early returns below)
   // so it's reachable regardless of connection state.
-  iconGear(gearX + gearW / 2, gearY + gearH / 2, COL_MUTED);
+  drawGearButton();
 
   const uint16_t IN_COL = RGB565(0, 176, 255);    // inputs: cyan/blue
   const uint16_t OUT_COL = RGB565(255, 150, 40);  // outputs: amber
@@ -284,7 +294,7 @@ static void drawPowerScreen() {
     uint16_t btCol = (bt == BTC_CONNECTING)
                          ? ((btAnimPhase & 1) ? COL_OFF : ACC_WEATHER)
                          : COL_MUTED;
-    iconBluetooth(W / 2, H / 2 - 66, btCol);
+    iconBluetooth(W / 2, H / 2 - 72, btCol, 2);  // 2x scale to match the size-3 heading below it
     drawCenteredText("Bluetti offline", W / 2, H / 2 - 30, 3, COL_WARN);
     drawCenteredText(strlen(settings.bluettiMac)
                          ? "Connecting to the Bluetti..."
@@ -294,8 +304,8 @@ static void drawPowerScreen() {
   }
 
   // Four corner cards; the two OUTPUT cards double as on/off toggles.
-  drawPowerCard(0, "DC IN", power.dcInW, IN_COL, -1);
-  drawPowerCard(1, "AC IN", power.acInW, IN_COL, -1);
+  drawPowerCard(0, "DC IN", power.dcInW, IN_COL, power.dcInW > 0 ? 2 : -1);
+  drawPowerCard(1, "AC IN", power.acInW, IN_COL, power.acInW > 0 ? 2 : -1);
   drawPowerCard(2, "DC OUT", power.dcOutW, OUT_COL, power.dcOn ? 1 : 0);
   drawPowerCard(3, "AC OUT", power.acOutW, OUT_COL, power.acOn ? 1 : 0);
 
@@ -536,20 +546,6 @@ static void drawChartScreen() {
   lastMs = millis() - t0;
 }
 
-// A labelled settings row: label on the left, current value on the right,
-// tappable to edit. Returns nothing; geometry is fixed by layout().
-static void drawSettingRow(int16_t x, int16_t y, int16_t w, int16_t h,
-                           const char *label, const char *value) {
-  gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
-  drawText(label, x + 14, y + 8, 1, COL_MUTED);
-  drawText(strlen(value) ? value : "(tap to set)", x + 14, y + 22, 2,
-           COL_TEXT);
-  // chevron
-  int16_t cxr = x + w - 22, cyr = y + h / 2;
-  gfx->drawLine(cxr, cyr - 6, cxr + 6, cyr, COL_MUTED);
-  gfx->drawLine(cxr + 6, cyr, cxr, cyr + 6, COL_MUTED);
-}
-
 // Shared compact row geometry for the Bluetti settings page.
 static int16_t srowY(int i) { return nameRowY + i * (nameRowH + 4); }
 
@@ -642,8 +638,10 @@ static void drawBtSettings() {
   snprintf(cl, sizeof(cl), "%d%%", power.chargeLimit);
   drawBtStepperRow(3, "Charge Limit", cl);
   drawBtValueRow(4, "Screen Timeout", btTimeoutLabel(power.screenTimeout));
-  drawSettingRow(nameRowX, srowY(5), nameRowW, nameRowH, "Pairing (BLE MAC)",
-                 strlen(settings.bluettiMac) ? settings.bluettiMac : "Auto");
+  // Tap opens the keyboard pre-filled with the actual MAC (or blank) for
+  // full editing; the row itself just shows Auto/Custom, matching the
+  // short-status-word style of the other value rows.
+  drawBtValueRow(5, "Pairing", strlen(settings.bluettiMac) ? "Custom" : "Auto");
   // AC output voltage + frequency, with a clear gap below the last row so it
   // doesn't crowd the Pairing row above it.
   char ac[40];

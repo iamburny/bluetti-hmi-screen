@@ -80,7 +80,7 @@ Read (holding registers, big‑endian words):
 | **142** | **AC output power** | W (verified: tracks AC load) |
 | **144** | **DC input power** | W |
 | **146** | **AC input power** | W |
-| 152 | Battery temperature | °C (confirmed under load; read into `tempC`) |
+| 152 | unidentified | once taken for battery temperature; only ever creeps upward, so not a live reading |
 | 154 | Lifetime generation | ×0.1 kWh |
 | 1314 / 1315 | AC input voltage / current | ×0.1 |
 | 1432 / 1470 | AC output current / frequency | ×0.1 |
@@ -121,7 +121,7 @@ Confirmed under a 44 W AC load (2026-06-25):
 |---|---|
 | **142** | AC output power W — read 44, matched the unit exactly |
 | **104** (=105) | **TIME_REMAINING in MINUTES** — 1987 ≈ 33 h at 44 W (firmware treats reg 104 as minutes; hidden when idle/huge) |
-| **152** | **battery temperature °C** — 24→25 as it warmed under load |
+| 152 | rose 24→25 under load; first taken for battery temperature, later ruled out (only ever creeps upward) |
 | **1431** | AC output voltage ×0.1 (~230.8 V) |
 | **1432** | AC output current ×0.1 (0.4 A under load) |
 | **169** | AC output voltage (integer V) — mirrors 1431 |
@@ -290,15 +290,11 @@ Treat the fan as unavailable unless someone turns up vendor documentation or
 a different function code. Don't spend more time sweeping for it — three
 campaigns and the screen-state result all point the same way.
 
-**The fan is not driven by reg 156 (battery temp), so don't try to synthesise
-a fan indicator from it.** Observed: reg 156 stayed at 26 °C across the fan
-both starting *and* stopping. That fits — the fan cools the **inverter /
-power electronics**, whose MOSFETs and transformer heat up within seconds of
-a load, whereas the battery pack's thermal mass moves far too slowly (it
-tracked 24→25→26 °C over a whole session). The internal heatsink sensor that
-actually drives the fan isn't exposed either. Incidentally this is decent
-corroboration that reg 156 really is battery temperature: a slow, monotonic,
-plausible drift rather than something mislabelled.
+**The fan is not driven by reg 156, so don't try to synthesise a fan
+indicator from it.** Observed: reg 156 stayed at 26 across the fan both
+starting *and* stopping. The internal heatsink sensor that actually drives the
+fan isn't exposed either. (This slow drift was once read as evidence that 156
+is battery temperature. It isn't -- see "Reg 156 is unidentified" below.)
 
 **Correction to the wide-sweep notes above: `700–759` is NOT all-zero.**
 Found populated: `701`=2, `702`=32177, `703`=1526, `704`=61, `705`=256,
@@ -324,13 +320,25 @@ So the only load telemetry available is the two aggregates already in use:
 reg `140` (DC output W, covers all USB + 12 V DC) and reg `142` (AC output W,
 covers both UK sockets). Anything finer-grained isn't exposed over Modbus.
 
-**Reg 156 = battery temperature — wired in as `power.tempC`** (replacing the
-abandoned reg 152, which only ever crept upward — see the note above). Only
-one data point so far (24°C idle → 25°C under load), but that's a live,
-plausible, small delta unlike reg 152's one-way creep. Shown on the Bluetti
-Settings page's bottom info line, and the Power screen shows a "High Temp"
-warning above the gauge once it exceeds 32°C. Needs more observation before
-fully trusting it as the true live reading.
+**Reg 156 is unidentified -- it is NOT battery temperature.** It was wired in
+as battery temperature on the strength of one idle-vs-load diff (24 → 25) and
+never tested against a reading that could falsify it. Values seen so far:
+
+| When | Reg 156 |
+|---|---|
+| 2026-06-25 idle dump | 6 |
+| 2026-08-05 idle → 44 W load | 24 → 25 |
+| 2026-08-05 across fan start/stop | 26 |
+| 2026-09 | 62 |
+
+The Bluetti app shows no temperature anywhere, and neither the open library
+(`Patrick762/bluetti-bt-lib`) nor the official one maps reg 156 for any model.
+The firmware now reads it raw as `power.reg156` and shows it only as a neutral
+"Reg 156" on the Bluetti Settings info line, an "R156" chart series on its own
+auto scale, and the `reg156` column of `/logs/power.csv`, so its behaviour can
+be logged against the power flows until it's identified. The "High Temp"
+warning that used to key off it was removed. Same lesson as reg 148: a
+plausible-looking delta isn't confirmation.
 
 Other registers that changed in the same diff, for reference (not wired to
 anything): `100` 1000→1013 (drifts even at idle, looks like a counter), `101`

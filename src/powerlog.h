@@ -9,7 +9,7 @@ struct PwrSample {                   // 14 bytes
   uint32_t t;                        // uptime secs (millis()/1000 at sample time)
   int16_t soc;                       // %
   int16_t dcIn, acIn, dcOut, acOut;  // watts
-  int16_t tempC;                     // battery temp, deg C (reg 156); 0 in
+  int16_t reg156;                    // raw reg 156 (unidentified); 0 in
                                       // samples replayed from a pre-existing
                                       // CSV logged before this field existed
 };
@@ -22,6 +22,10 @@ void powerlog_tick();
 
 // Samples currently held (0..RING_N).
 int powerlog_count();
+
+// Samples pushed since boot. Unlike powerlog_count() it keeps changing once
+// the ring is full, so it's what to watch for "a new sample landed".
+uint32_t powerlog_total();
 
 // Sample by age: i = 0 is oldest, count-1 is newest. Out-of-range -> zeroed.
 const PwrSample &powerlog_at(int i);

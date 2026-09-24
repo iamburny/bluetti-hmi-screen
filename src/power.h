@@ -16,9 +16,8 @@ struct PowerData {
   int acOutW;    // AC output (inverter loads), watts
   int whRemaining;  // remaining energy, watt-hours (0 = unknown)
   int ttfMin;    // minutes to empty (discharging) or full (charging); <=0 = n/a
-  int tempC;     // battery temperature, deg C (reg 156 -- see docs/BLUETTI.md;
-                 // reg 152 was tried first but only ever creeps upward, never
-                 // reflecting a live reading -- don't go back to it)
+  int reg156;    // raw reg 156, meaning unknown (not battery temperature --
+                 // see docs/BLUETTI.md). Shown and charted so it can be identified.
   int acOutDV;   // AC output voltage, deci-volts (reg 1431; /10 = volts)
   int chargeMode;  // 0=Standard, 1=Silent, 2=Turbo, 4=Custom (reg 2020)
   int gridChargeA; // Custom max grid charging current, A (reg 2214)

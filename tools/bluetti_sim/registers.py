@@ -21,7 +21,7 @@ CAPACITY_WH = 3024
 SOC = 102
 TIME_REMAINING = 104      # minutes
 DC_OUT_W, AC_OUT_W, DC_IN_W, AC_IN_W = 140, 142, 144, 146
-BATTERY_TEMP = 156        # degC
+REG_156 = 156             # meaning unknown (not battery temperature)
 AC_OUT_DV = 1431          # volts x10
 AC_OUT_FREQ_DHZ = 1500    # Hz x10
 CTRL_AC, CTRL_DC = 2011, 2012
@@ -66,7 +66,7 @@ class Registers:
             self._r[116 + i] = (serial >> (16 * i)) & 0xFFFF
         self._r.update({
             SOC: 80, TIME_REMAINING: 0, DC_OUT_W: 0, AC_OUT_W: 0, DC_IN_W: 0,
-            AC_IN_W: 0, BATTERY_TEMP: 24, AC_OUT_DV: 2300, AC_OUT_FREQ_DHZ: 500,
+            AC_IN_W: 0, REG_156: 24, AC_OUT_DV: 2300, AC_OUT_FREQ_DHZ: 500,
             CTRL_AC: 1, CTRL_DC: 1, DC_ECO: 0, AC_ECO: 0, CHARGE_MODE: 0,
             POWER_LIFT: 0, SCREEN_TIMEOUT: 3, CHARGE_LIMIT: 100 << 8,
             GRID_CHARGE_A: 3,

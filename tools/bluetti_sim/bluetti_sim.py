@@ -11,7 +11,7 @@ from tkinter import ttk
 
 from ble_server import BleServer
 from registers import (
-    AC_ECO, AC_IN_W, AC_OUT_DV, AC_OUT_FREQ_DHZ, AC_OUT_W, BATTERY_TEMP,
+    AC_ECO, AC_IN_W, AC_OUT_DV, AC_OUT_FREQ_DHZ, AC_OUT_W, REG_156,
     CHARGE_LIMIT, CHARGE_MODE, CTRL_AC, CTRL_DC, DC_ECO, DC_IN_W, DC_OUT_W,
     GRID_CHARGE_A, POWER_LIFT, SCREEN_TIMEOUT, SOC, TIME_REMAINING, Registers)
 
@@ -58,7 +58,7 @@ class App:
         self._slider(left, "AC out W", AC_OUT_W, 0, 3000)
         self._slider(left, "DC in W", DC_IN_W, 0, 3000)
         self._slider(left, "AC in W", AC_IN_W, 0, 3000)
-        self._slider(left, "Battery temp C", BATTERY_TEMP, 0, 60)
+        self._slider(left, "Reg 156 (unknown)", REG_156, 0, 100)
         self._slider(left, "AC out voltage", AC_OUT_DV, 0, 2600, scale=0.1, digits=1)
         self._slider(left, "AC frequency Hz", AC_OUT_FREQ_DHZ, 450, 650, scale=0.1, digits=1)
 

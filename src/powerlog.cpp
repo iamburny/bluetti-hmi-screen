@@ -14,6 +14,7 @@ static const uint32_t SAMPLE_INTERVAL_MS = 15000;
 static PwrSample *ring = nullptr;
 static int head = 0;    // next write slot
 static int count = 0;   // valid samples held
+static uint32_t total = 0;  // samples ever pushed; keeps rising once the ring is full
 static const PwrSample ZERO = {};
 
 static int16_t clamp16(int v) {
@@ -26,6 +27,7 @@ static void pushRing(const PwrSample &s) {
   ring[head] = s;
   head = (head + 1) % RING_N;
   if (count < RING_N) count++;
+  total++;
 }
 
 static void loadFromSd();  // restore recent history at boot (defined below)
@@ -62,14 +64,14 @@ static void logToSd(const PwrSample &s) {
     strncpy(g_logPath, path, sizeof(g_logPath) - 1);
     g_logPath[sizeof(g_logPath) - 1] = '\0';
     if (g_logf && isNew)
-      g_logf.println("epoch,iso,soc,dc_in,ac_in,dc_out,ac_out,temp_c");
+      g_logf.println("epoch,iso,soc,dc_in,ac_in,dc_out,ac_out,reg156");
   }
   if (!g_logf) {
     g_logPath[0] = '\0';  // open failed (card pulled?) — retry next sample
     return;
   }
   g_logf.printf("%lu,%s,%d,%d,%d,%d,%d,%d\n", (unsigned long)s.t, "", s.soc,
-                s.dcIn, s.acIn, s.dcOut, s.acOut, s.tempC);
+                s.dcIn, s.acIn, s.dcOut, s.acOut, s.reg156);
   g_logf.flush();  // persist without paying the open-seek cost each sample
 }
 
@@ -90,7 +92,7 @@ void powerlog_tick() {
   s.acIn = clamp16(power.acInW);
   s.dcOut = clamp16(power.dcOutW);
   s.acOut = clamp16(power.acOutW);
-  s.tempC = clamp16(power.tempC);
+  s.reg156 = clamp16(power.reg156);
 
   pushRing(s);
   logToSd(s);
@@ -104,7 +106,7 @@ static void replaySdFile(const char *path) {
     String line = f.readStringUntil('\n');
     char *p = (char *)line.c_str();
     if (*p < '0' || *p > '9') continue;  // skip the header / blank lines
-    PwrSample s = {};  // zero-init: tempC defaults to 0 for pre-temp-logging rows
+    PwrSample s = {};  // zero-init: reg156 defaults to 0 for rows logged before it
     s.t = strtoul(p, &p, 10);
     if (*p == ',') p++;
     while (*p && *p != ',') p++;  // skip the iso field
@@ -114,7 +116,7 @@ static void replaySdFile(const char *path) {
     s.acIn = (int16_t)strtol(p, &p, 10); if (*p == ',') p++;
     s.dcOut = (int16_t)strtol(p, &p, 10); if (*p == ',') p++;
     s.acOut = (int16_t)strtol(p, &p, 10);
-    if (*p == ',') { p++; s.tempC = (int16_t)strtol(p, &p, 10); }
+    if (*p == ',') { p++; s.reg156 = (int16_t)strtol(p, &p, 10); }
     pushRing(s);
   }
   f.close();
@@ -132,6 +134,7 @@ static void loadFromSd() {
 }
 
 int powerlog_count() { return count; }
+uint32_t powerlog_total() { return total; }
 
 const PwrSample &powerlog_at(int i) {
   if (!ring || i < 0 || i >= count) return ZERO;

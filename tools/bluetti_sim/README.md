@@ -25,7 +25,7 @@ python -m venv .venv
 ```
 
 The window shows "advertising" once the PC is on the air. Sliders are the live
-telemetry (SoC, watts, temperature, AC voltage and frequency). The controls on
+telemetry (SoC, watts, AC voltage and frequency, and the unidentified register 156). The controls on
 the right are the registers the HMI writes; a tap on the screen flips them here
 once the unit's commit delay has passed (0.4 s, same as the real Elite 300).
 "Simulate battery" moves SoC and time remaining from the net power and the

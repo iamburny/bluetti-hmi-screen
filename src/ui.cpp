@@ -400,14 +400,6 @@ static void drawPowerScreen() {
     drawCenteredText(stateText, W / 2, 18, 1, stateColor);
   }
 
-  // Battery-temperature warning: only shown once it crosses 32C (no
-  // permanent footprint otherwise). Reg 156 -- see power.h/BLUETTI.md.
-  if (power.tempC > 32) {
-    char warn[24];
-    snprintf(warn, sizeof(warn), "High Temp: %d\xf8" "C", power.tempC);
-    drawCenteredText(warn, W / 2, 44, 2, COL_WARN);
-  }
-
   // Centre ring gauge.
   const int16_t cx = W / 2, cy = H / 2, rOuter = 74, thick = 12;
   uint16_t ringCol = power.soc <= 15 ? COL_WARN : IN_COL;
@@ -476,12 +468,11 @@ static void drawPowerScreen() {
 // Four flows overlaid: Solar (DC in), AC In, DC Out, AC Out. Legend chips double
 // as show/hide filters; 1h/6h/24h buttons pick the X span. Fed by powerlog.
 // Series 0..3 are watts (share the auto-scaled left axis); series 4 (SoC) is a
-// percentage on its own fixed 0..100 scale, series 5 (battery temp) a fixed
-// 0..50C scale (see SOC_SERIES/TEMP_SERIES handling).
+// percentage on its own fixed 0..100 scale, series 5 (raw reg 156, meaning
+// unknown) on its own auto scale (see SOC_SERIES/R156_SERIES handling).
 #define NSER 6
 #define SOC_SERIES 4
-#define TEMP_SERIES 5
-#define TEMP_SCALE_MAX 50
+#define R156_SERIES 5
 // AC Out was ACC_WATER (82,138,255) which is near-indistinguishable from AC
 // In's ACC_WEATHER (90,178,255) -- both mid blues. Given a green, an amber, a
 // lilac and a red are already spoken for, magenta is the remaining clearly
@@ -492,7 +483,7 @@ static const uint16_t SERIES_COL[NSER] = {COL_ON,          ACC_WEATHER,
                                           ACC_LIGHTS,      CHART_ACOUT_COL,
                                           ACC_SETTINGS,    COL_WARN};
 static const char *SERIES_LBL[NSER] = {"Solar", "AC In", "DC Out", "AC Out",
-                                       "SoC",   "Temp"};
+                                       "SoC",   "R156"};
 static const char *CHART_WIN_LBL[3] = {"1h", "6h", "24h"};
 
 // Per-column downsample cache (one entry per plot pixel-column). Filled once per
@@ -506,7 +497,7 @@ static int seriesNow(int k) {
     case 1: return power.acInW;
     case 2: return power.dcOutW;
     case 3: return power.acOutW;
-    case TEMP_SERIES: return power.tempC;
+    case R156_SERIES: return power.reg156;
     default: return power.soc;
   }
 }
@@ -541,8 +532,8 @@ static void drawChartLegend() {
     char v[10];
     if (i == SOC_SERIES)
       snprintf(v, sizeof(v), "%d%%", seriesNow(i));
-    else if (i == TEMP_SERIES)
-      snprintf(v, sizeof(v), "%d\xf8" "C", seriesNow(i));
+    else if (i == R156_SERIES)
+      snprintf(v, sizeof(v), "%d", seriesNow(i));
     else
       snprintf(v, sizeof(v), "%dW", seriesNow(i));
     drawText(v, x + 20, y + 24, 2, on ? COL_TEXT : COL_MUTED);
@@ -592,7 +583,7 @@ static void drawChartScreen() {
     g_col[px][2] = s.dcOut;
     g_col[px][3] = s.acOut;
     g_col[px][4] = s.soc;
-    g_col[px][5] = s.tempC;
+    g_col[px][5] = s.reg156;
   }
 
   // Auto-scale watts (series 0..3) over the visible, enabled series.
@@ -641,21 +632,29 @@ static void drawChartScreen() {
     drawText(tb, lx, PY1 + 5, 1, COL_MUTED);
   }
 
-  // SoC and battery temp each ride their own fixed scale (right side); flag
-  // them so the axis reads. Stack the labels if both are enabled at once.
+  // Reg 156 has no known range, so it scales to its own visible max
+  // (at least 10, rounded up to a multiple of 10).
+  int r156Max = 10;
+  for (int px = 0; px < plotW; px++)
+    if (g_col[px][R156_SERIES] > r156Max) r156Max = g_col[px][R156_SERIES];
+  r156Max = ((r156Max + 9) / 10) * 10;
+
+  // SoC and reg 156 each ride their own scale (right side); flag them so the
+  // axis reads. Stack the labels if both are enabled at once.
   bool socOn = settings.chartSeriesMask & (1 << SOC_SERIES);
-  bool tempOn = settings.chartSeriesMask & (1 << TEMP_SERIES);
+  bool r156On = settings.chartSeriesMask & (1 << R156_SERIES);
   if (socOn) drawText("100%", PX1 - 24, PY0 - 3, 1, SERIES_COL[SOC_SERIES]);
-  if (tempOn)
-    drawText("50\xf8" "C", PX1 - 24, PY0 - 3 - (socOn ? 13 : 0), 1,
-             SERIES_COL[TEMP_SERIES]);  // matches TEMP_SCALE_MAX below
+  if (r156On) {
+    char ml[8];
+    snprintf(ml, sizeof(ml), "%d", r156Max);
+    drawText(ml, PX1 - 24, PY0 - 3 - (socOn ? 13 : 0), 1, SERIES_COL[R156_SERIES]);
+  }
 
   // One polyline per visible series, downsampled to plot-width columns. Watts
-  // series use the auto-scaled yMax; SoC and battery temp use their own
-  // fixed scales.
+  // series use the auto-scaled yMax; SoC and reg 156 use their own scales.
   for (int k = 0; k < NSER; k++) {
     if (!(settings.chartSeriesMask & (1 << k))) continue;
-    int scale = (k == SOC_SERIES) ? 100 : (k == TEMP_SERIES) ? TEMP_SCALE_MAX : yMax;
+    int scale = (k == SOC_SERIES) ? 100 : (k == R156_SERIES) ? r156Max : yMax;
     uint16_t col = SERIES_COL[k];
     int16_t prevY = 0;
     bool have = false;
@@ -778,17 +777,16 @@ static void drawBtSettings() {
   // learned automatically from a scan rather than typed in -- clearing it
   // returns to scanning (and it'll simply re-learn on the next connect).
   drawBtValueRow(5, "Pairing", strlen(settings.bluettiMac) ? "Saved" : "Scan");
-  // Battery temp (reg 156) + AC output voltage/frequency, with a clear gap
-  // below the last row so it doesn't crowd the Pairing row above it.
+  // Raw reg 156 (meaning unknown) + AC output voltage/frequency, with a clear
+  // gap below the last row so it doesn't crowd the Pairing row above it.
   char ac[56];
   if (power.acOn && power.acOutDV > 0)
-    snprintf(ac, sizeof(ac), "Battery %d\xf8" "C    AC out: %d.%d V  %d.%d Hz",
-             power.tempC, power.acOutDV / 10, power.acOutDV % 10,
+    snprintf(ac, sizeof(ac), "Reg 156: %d    AC out: %d.%d V  %d.%d Hz",
+             power.reg156, power.acOutDV / 10, power.acOutDV % 10,
              power.acOutFreqDHz / 10, power.acOutFreqDHz % 10);
   else
-    snprintf(ac, sizeof(ac), "Battery %d\xf8" "C    AC output off", power.tempC);
-  drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1,
-                   power.tempC > 32 ? COL_WARN : COL_MUTED);
+    snprintf(ac, sizeof(ac), "Reg 156: %d    AC output off", power.reg156);
+  drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1, COL_MUTED);
 }
 
 // ===== Diagnostics page (hidden: long-press the gear) ======================
@@ -1035,7 +1033,7 @@ void ui_tick() {
     static int lastSoc = -999, lastSum = -999999, lastFlags = -1, lastTtf = -1;
     static uint32_t lastPulse = 0;
     int sum = power.dcInW + power.acInW + power.dcOutW + power.acOutW +
-              power.chargeMode * 7 + power.tempC * 11;
+              power.chargeMode * 7;
     int flags = (power.acOn ? 1 : 0) | (power.dcOn ? 2 : 0) |
                 (power.charging ? 4 : 0) | (power.gridConnected ? 16 : 0);
     bool dataChanged = power.status != lastPs || power.soc != lastSoc ||
@@ -1057,10 +1055,10 @@ void ui_tick() {
 
   // Redraw the history chart when a new sample lands (taps redraw directly).
   if (current == POWER_CHART) {
-    static int lastCount = -1;
-    int c = powerlog_count();
-    if (c != lastCount) {
-      lastCount = c;
+    static uint32_t lastTotal = UINT32_MAX;
+    uint32_t t = powerlog_total();
+    if (t != lastTotal) {
+      lastTotal = t;
       ui_draw();
     }
     return;
@@ -1085,17 +1083,20 @@ void ui_tick() {
 
   // Redraw the Bluetti settings sub-page when a toggle is confirmed by a poll.
   if (current == BT_SETTINGS) {
-    static int lastBt = -1, lastBt2 = -1;
+    static int lastBt = -1, lastBt2 = -1, lastR156 = -1;
     static bool lastValid = false;
     bool pv = power_valid();  // placeholder <-> controls transition
     int b = (power.acEco ? 1 : 0) | (power.dcEco ? 2 : 0) |
             (power.powerLift ? 4 : 0) | (power.chargeLimit << 3) |
             (power.screenTimeout << 10);
     int b2 = (power.acOn ? 1 : 0) | (power.acOutDV << 1) |
-             (power.acOutFreqDHz << 14) | (power.tempC << 24);  // AC info line + battery temp
-    if (b != lastBt || b2 != lastBt2 || pv != lastValid) {
+             (power.acOutFreqDHz << 14);  // AC info line
+    // Reg 156 has no known range, so it's compared whole rather than packed.
+    if (b != lastBt || b2 != lastBt2 || power.reg156 != lastR156 ||
+        pv != lastValid) {
       lastBt = b;
       lastBt2 = b2;
+      lastR156 = power.reg156;
       lastValid = pv;
       ui_draw();
     }

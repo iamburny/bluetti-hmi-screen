@@ -65,7 +65,7 @@ static const uint16_t REG_CTRL_DC = 2012;
 // forward between polls so PowerData stays complete.
 #define SLOW_EVERY 10
 struct SlowCache {
-  int tempC, acOutDV, acOutFreqDHz, chargeMode, gridChargeA, chargeLimit,
+  int reg156, acOutDV, acOutFreqDHz, chargeMode, gridChargeA, chargeLimit,
       screenTimeout;
   bool acEco, dcEco, powerLift;
   bool valid;
@@ -526,7 +526,7 @@ static bool poll() {
   // polls, plus immediately after any write and on every reconnect, so a
   // user-initiated change still shows up on the very next poll.
   if (g_forceFull || !g_slow.valid || (g_slowTick % SLOW_EVERY) == 0) {
-    if (readRegs(156, 1, w, 1) == 1) g_slow.tempC = w[0];        // battery temp degC
+    if (readRegs(156, 1, w, 1) == 1) g_slow.reg156 = w[0];       // unidentified
     if (readRegs(1431, 1, w, 1) == 1) g_slow.acOutDV = w[0];     // AC out V x10
     if (readRegs(1500, 1, w, 1) == 1) g_slow.acOutFreqDHz = w[0];
     if (readRegs(2020, 1, w, 1) == 1) g_slow.chargeMode = w[0];  // 0/1/2/4 mode
@@ -541,7 +541,7 @@ static bool poll() {
   }
   g_slowTick++;
 
-  tmp.tempC = g_slow.tempC;
+  tmp.reg156 = g_slow.reg156;
   tmp.acOutDV = g_slow.acOutDV;
   tmp.acOutFreqDHz = g_slow.acOutFreqDHz;
   tmp.chargeMode = g_slow.chargeMode;

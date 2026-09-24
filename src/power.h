@@ -18,6 +18,12 @@ struct PowerData {
   int ttfMin;    // minutes to empty (discharging) or full (charging); <=0 = n/a
   int reg156;    // raw reg 156, meaning unknown (not battery temperature --
                  // see docs/BLUETTI.md). Shown and charted so it can be identified.
+  // Lifetime energy counters, 0.1 kWh units, each a 32-bit value across two
+  // registers with the low word first. Names come from the community V2
+  // register map (see docs/BLUETTI.md "Lifetime energy counters").
+  uint32_t acOutEnergy;    // AC output energy (regs 152/153)
+  uint32_t pvChgEnergy;    // solar / DC-input charging energy (regs 154/155)
+  uint32_t gridChgEnergy;  // grid (mains) charging energy (regs 156/157)
   int acOutDV;   // AC output voltage, deci-volts (reg 1431; /10 = volts)
   int chargeMode;  // 0=Standard, 1=Silent, 2=Turbo, 4=Custom (reg 2020)
   int gridChargeA; // Custom max grid charging current, A (reg 2214)

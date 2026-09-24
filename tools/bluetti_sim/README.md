@@ -25,9 +25,11 @@ python -m venv .venv
 ```
 
 The window shows "advertising" once the PC is on the air. Sliders are the live
-telemetry (SoC, watts, AC voltage and frequency, and the unidentified register 156). The controls on
+telemetry (SoC, watts, AC voltage and frequency). The controls on
 the right are the registers the HMI writes; a tap on the screen flips them here
 once the unit's commit delay has passed (0.4 s, same as the real Elite 300).
+The lifetime energy counters (grid charging, solar/DC charging, AC output) build
+up from the power flows; type a kWh value and press Enter to set one.
 "Simulate battery" moves SoC and time remaining from the net power and the
 unit's 3024 Wh capacity. "Disconnect client" drops the link so the HMI's
 reconnect path runs.

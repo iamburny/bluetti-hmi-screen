@@ -76,9 +76,9 @@ communicate through small C-style functions and shared structs, not classes.
 - `ui.{h,cpp}` — screen-state machine, full-height (no status bar): `POWER`
   (home screen — SoC gauge, DC/AC in/out cards, output toggles, charge-mode
   button), `POWER_CHART` (power-flow history), `BT_SETTINGS` (a top utility
-  row for history + app-release, always available regardless of connection
-  state, then ECO/charge-limit/screen-timeout/BLE-MAC pairing once live data
-  arrives). The settings gear sits in the gap between the AC IN and AC OUT
+  row for history + app-release + lifetime energy, always available regardless
+  of connection state, then ECO/charge-limit/screen-timeout/BLE-MAC pairing
+  once live data arrives), `ENERGY` (lifetime kWh counters, regs 152-157). The settings gear sits in the gap between the AC IN and AC OUT
   cards on the Power screen; a Bluetooth link icon (flashes while connecting)
   only appears on the "Bluetti offline" state, since that's the only time
   link status is otherwise invisible. `theme.h` = shared palette.

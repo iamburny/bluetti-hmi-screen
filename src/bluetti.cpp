@@ -65,6 +65,7 @@ static const uint16_t REG_CTRL_DC = 2012;
 // forward between polls so PowerData stays complete.
 #define SLOW_EVERY 10
 struct SlowCache {
+  uint32_t acOutEnergy, pvChgEnergy, gridChgEnergy;
   int reg156, acOutDV, acOutFreqDHz, chargeMode, gridChargeA, chargeLimit,
       screenTimeout;
   bool acEco, dcEco, powerLift;
@@ -526,7 +527,14 @@ static bool poll() {
   // polls, plus immediately after any write and on every reconnect, so a
   // user-initiated change still shows up on the very next poll.
   if (g_forceFull || !g_slow.valid || (g_slowTick % SLOW_EVERY) == 0) {
-    if (readRegs(156, 1, w, 1) == 1) g_slow.reg156 = w[0];       // unidentified
+    // Lifetime energy counters: three 32-bit values, low word first. Reg 156
+    // (the grid counter's low word) is also kept raw for the chart/CSV.
+    if (readRegs(152, 6, w, 8) == 6) {
+      g_slow.acOutEnergy = ((uint32_t)w[1] << 16) | w[0];
+      g_slow.pvChgEnergy = ((uint32_t)w[3] << 16) | w[2];
+      g_slow.gridChgEnergy = ((uint32_t)w[5] << 16) | w[4];
+      g_slow.reg156 = w[4];
+    }
     if (readRegs(1431, 1, w, 1) == 1) g_slow.acOutDV = w[0];     // AC out V x10
     if (readRegs(1500, 1, w, 1) == 1) g_slow.acOutFreqDHz = w[0];
     if (readRegs(2020, 1, w, 1) == 1) g_slow.chargeMode = w[0];  // 0/1/2/4 mode
@@ -542,6 +550,9 @@ static bool poll() {
   g_slowTick++;
 
   tmp.reg156 = g_slow.reg156;
+  tmp.acOutEnergy = g_slow.acOutEnergy;
+  tmp.pvChgEnergy = g_slow.pvChgEnergy;
+  tmp.gridChgEnergy = g_slow.gridChgEnergy;
   tmp.acOutDV = g_slow.acOutDV;
   tmp.acOutFreqDHz = g_slow.acOutFreqDHz;
   tmp.chargeMode = g_slow.chargeMode;

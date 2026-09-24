@@ -11,9 +11,10 @@ from tkinter import ttk
 
 from ble_server import BleServer
 from registers import (
-    AC_ECO, AC_IN_W, AC_OUT_DV, AC_OUT_FREQ_DHZ, AC_OUT_W, REG_156,
+    AC_ECO, AC_IN_W, AC_OUT_DV, AC_OUT_FREQ_DHZ, AC_OUT_W,
     CHARGE_LIMIT, CHARGE_MODE, CTRL_AC, CTRL_DC, DC_ECO, DC_IN_W, DC_OUT_W,
-    GRID_CHARGE_A, POWER_LIFT, SCREEN_TIMEOUT, SOC, TIME_REMAINING, Registers)
+    AC_OUT_ENERGY, GRID_CHARGE_A, GRID_CHG_ENERGY, POWER_LIFT, PV_CHG_ENERGY,
+    SCREEN_TIMEOUT, SOC, TIME_REMAINING, Registers)
 
 CHARGE_MODES = [("Standard", 0), ("Silent", 1), ("Turbo", 2), ("Custom", 4)]
 TIMEOUTS = [("30 s", 2), ("1 min", 3), ("5 min", 4), ("Never", 5)]
@@ -58,7 +59,6 @@ class App:
         self._slider(left, "AC out W", AC_OUT_W, 0, 3000)
         self._slider(left, "DC in W", DC_IN_W, 0, 3000)
         self._slider(left, "AC in W", AC_IN_W, 0, 3000)
-        self._slider(left, "Reg 156 (unknown)", REG_156, 0, 100)
         self._slider(left, "AC out voltage", AC_OUT_DV, 0, 2600, scale=0.1, digits=1)
         self._slider(left, "AC frequency Hz", AC_OUT_FREQ_DHZ, 450, 650, scale=0.1, digits=1)
 
@@ -72,6 +72,26 @@ class App:
         self._slider(right, "Charge limit %", CHARGE_LIMIT, 20, 100, encode=lambda p: p << 8,
                      decode=lambda w: w >> 8)
         self._choice(right, "Screen timeout", SCREEN_TIMEOUT, TIMEOUTS)
+
+        # Lifetime counters: they build up from the power flows; typing a
+        # value (Enter or leaving the field) sets the counter.
+        energy = ttk.LabelFrame(right, text="Lifetime energy kWh")
+        energy.pack(fill="x", padx=6, pady=(8, 4))
+        self.energy = {}
+        for label, addr in (("Grid charging", GRID_CHG_ENERGY),
+                            ("Solar / DC charging", PV_CHG_ENERGY),
+                            ("AC output", AC_OUT_ENERGY)):
+            row = ttk.Frame(energy)
+            row.pack(fill="x", padx=6, pady=2)
+            ttk.Label(row, text=label, width=18).pack(side="left")
+            var = tk.StringVar()
+            entry = ttk.Entry(row, textvariable=var, width=10)
+            entry.pack(side="left")
+            entry.bind("<Return>", lambda _e, a=addr: self._on_energy(a, leave=True))
+            entry.bind("<FocusOut>", lambda _e, a=addr: self._on_energy(a))
+            self.energy[addr] = (var, entry)
+        self._energy_shown = {}  # text last written to each entry
+        self._refresh_energy()
 
         bar = ttk.Frame(root)
         bar.pack(fill="x", padx=10)
@@ -181,6 +201,31 @@ class App:
         finally:
             self._updating = False
 
+    def _on_energy(self, addr, leave=False):
+        var, _entry = self.energy[addr]
+        # Only apply text the user actually changed: a FocusOut (e.g. alt-tab)
+        # on an untouched field would otherwise write a stale value back.
+        if var.get() != self._energy_shown.get(addr):
+            try:
+                self.regs.set_energy(addr, float(var.get()))
+            except ValueError:
+                pass
+        if leave:
+            self.root.focus_set()  # Enter leaves the field so it updates live again
+        self._refresh_energy()
+
+    def _refresh_energy(self):
+        try:
+            focused = self.root.focus_get()
+        except KeyError:  # raised while a Combobox dropdown is open
+            focused = None
+        for addr, (var, entry) in self.energy.items():
+            if entry is not focused:  # don't overwrite what's being typed
+                # Truncate to tenths, as the HMI does with the 0.1 kWh register.
+                text = f"{int(self.regs.get_energy(addr) * 10) / 10:.1f}"
+                var.set(text)
+                self._energy_shown[addr] = text
+
     def _preset(self, name):
         for addr, value in PRESETS[name].items():
             self.regs.set(addr, value)
@@ -228,6 +273,7 @@ class App:
             pass
         if committed or self.regs.simulate_battery:
             self._refresh_all()
+        self._refresh_energy()
         self.root.after(100, self._poll)
 
     def _close(self):

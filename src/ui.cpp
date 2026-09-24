@@ -9,7 +9,7 @@
 #include "logic/geom.h"
 
 // ===== Model ================================================================
-enum Screen { POWER, POWER_CHART, BT_SETTINGS, DIAGNOSTICS };
+enum Screen { POWER, POWER_CHART, BT_SETTINGS, DIAGNOSTICS, ENERGY };
 
 // Which field the keyboard is currently editing (so we can store on commit).
 enum EditTarget { EDIT_NONE, EDIT_BTMAC };
@@ -200,9 +200,10 @@ static void powerChargeBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   x = gfx->width() / 2 + 6;  // right of centre
 }
 
-// Top-of-screen utility row on the Bluetti Settings page: history (left) and
-// app-release (right). Always available regardless of connection state, so
-// callers must draw/handle these before any power_valid() gate.
+// Top-of-screen utility row on the Bluetti Settings page: history, app-release
+// and lifetime energy, left to right. Always available regardless of
+// connection state, so callers must draw/handle these before any
+// power_valid() gate.
 static const int16_t BT_BTN_Y = 8;
 static void btChartBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
@@ -211,6 +212,10 @@ static void btChartBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
 static void btReleaseBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
   x = gfx->width() / 2 + 6;  // right of centre
+}
+static void btEnergyBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+  w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
+  x = gfx->width() / 2 + 6 + PWR_BTN_W + 12;  // right of app-release
 }
 
 // Back button, top-left of the sub-pages. Swipe-back still works, but tap
@@ -250,6 +255,13 @@ static void drawChartButton() {
   gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
   gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
   iconChart(x + w / 2, y + h / 2, ACC_WATER);
+}
+static void drawEnergyButton() {
+  int16_t x, y, w, h;
+  btEnergyBtnRect(x, y, w, h);
+  gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
+  gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
+  drawCenteredText("kWh", x + w / 2, y + h / 2, 2, ACC_LIGHTS);
 }
 static void drawReleaseButton(int rem) {
   int16_t x, y, w, h;
@@ -754,6 +766,7 @@ static void drawBtSettings() {
   drawBackButton();
   drawChartButton();
   drawReleaseButton((int)bluetti_release_remaining());
+  drawEnergyButton();
 
   // Don't show/allow editing the rest of the controls until live data has
   // arrived.
@@ -787,6 +800,46 @@ static void drawBtSettings() {
   else
     snprintf(ac, sizeof(ac), "Reg 156: %d    AC output off", power.reg156);
   drawCenteredText(ac, W / 2, srowY(5) + nameRowH + 14, 1, COL_MUTED);
+}
+
+// ===== Lifetime energy page (kWh button on Bluetti Settings) ================
+// The unit's own lifetime counters, read in the slow poll tier. Values are in
+// 0.1 kWh, shown as kWh with one decimal.
+static void drawEnergyRow(int i, const char *label, uint32_t tenthsKwh) {
+  const int16_t y = 60 + i * 64, h = 52;
+  gfx->fillRoundRect(nameRowX, y, nameRowW, h, 8, COL_TILE);
+  drawText(label, nameRowX + 14, y + (h - 16) / 2, 2, COL_TEXT);
+  char v[20];
+  snprintf(v, sizeof(v), "%lu.%lu kWh", (unsigned long)(tenthsKwh / 10),
+           (unsigned long)(tenthsKwh % 10));
+  // Drop to a smaller size if an implausibly large value would run into the
+  // label (these registers aren't verified on the unit yet).
+  int16_t lw, lh, vw, vh;
+  measureText(label, 2, lw, lh);
+  const int16_t room = nameRowW - 14 - lw - 16 - 14;
+  uint8_t size = 3;
+  measureText(v, size, vw, vh);
+  if (vw > room) {
+    size = 2;
+    measureText(v, size, vw, vh);
+  }
+  drawText(v, nameRowX + nameRowW - 14 - vw, y + (h - vh) / 2, size, COL_TEXT);
+}
+
+static void drawEnergyScreen() {
+  const int16_t W = gfx->width(), H = gfx->height();
+  gfx->fillScreen(COL_BG);
+  drawBackButton();
+  drawText("Lifetime Energy", 62, 14, 2, COL_TEXT);  // clear of the back button
+  if (!power_valid()) {
+    drawCenteredText("Connecting to the Bluetti...", W / 2, H / 2, 2, COL_MUTED);
+    return;
+  }
+  drawEnergyRow(0, "Grid charging", power.gridChgEnergy);
+  drawEnergyRow(1, "Solar / DC charging", power.pvChgEnergy);
+  drawEnergyRow(2, "AC output", power.acOutEnergy);
+  drawCenteredText("Totals kept by the Bluetti (regs 152-157)", W / 2, H - 22, 1,
+                   COL_MUTED);
 }
 
 // ===== Diagnostics page (hidden: long-press the gear) ======================
@@ -959,6 +1012,7 @@ void ui_draw() {
     case POWER_CHART: drawChartScreen(); break;
     case BT_SETTINGS: drawBtSettings(); break;
     case DIAGNOSTICS: drawDiagnostics(); break;
+    case ENERGY: drawEnergyScreen(); break;
   }
   if (g_writePending && (current == POWER || current == BT_SETTINGS))
     drawPendingSpinner();
@@ -1048,6 +1102,22 @@ void ui_tick() {
       lastFlags = flags;
       lastTtf = power.ttfMin;
       if (pulseTick) lastPulse = millis();
+      ui_draw();
+    }
+    return;
+  }
+
+  // Lifetime energy: repaint when a counter moves or the link comes and goes.
+  if (current == ENERGY) {
+    static uint32_t lastA = UINT32_MAX, lastP = UINT32_MAX, lastG = UINT32_MAX;
+    static bool lastValid = false;
+    bool pv = power_valid();
+    if (power.acOutEnergy != lastA || power.pvChgEnergy != lastP ||
+        power.gridChgEnergy != lastG || pv != lastValid) {
+      lastA = power.acOutEnergy;
+      lastP = power.pvChgEnergy;
+      lastG = power.gridChgEnergy;
+      lastValid = pv;
       ui_draw();
     }
     return;
@@ -1249,6 +1319,12 @@ void ui_handle_touch(int16_t x, int16_t y) {
         ui_draw();
         return;
       }
+      btEnergyBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        current = ENERGY;
+        ui_draw();
+        return;
+      }
     }
     if (!power_valid()) return;  // remaining controls disabled until live data arrives
     struct { int reg; bool *val; } rows[3] = {
@@ -1295,6 +1371,17 @@ void ui_handle_touch(int16_t x, int16_t y) {
                     sizeof(settings.bluettiMac) - 1, false);
       ui_draw();
       return;
+    }
+    return;
+  }
+
+  // Lifetime energy: back returns to Bluetti Settings, where it was opened.
+  if (current == ENERGY) {
+    int16_t bx, by, bw, bh;
+    backBtnRect(bx, by, bw, bh);
+    if (inRect(x, y, bx, by, bw, bh)) {
+      current = BT_SETTINGS;
+      ui_draw();
     }
     return;
   }

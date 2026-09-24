@@ -21,7 +21,11 @@ CAPACITY_WH = 3024
 SOC = 102
 TIME_REMAINING = 104      # minutes
 DC_OUT_W, AC_OUT_W, DC_IN_W, AC_IN_W = 140, 142, 144, 146
-REG_156 = 156             # meaning unknown (not battery temperature)
+# Lifetime energy counters: 32-bit, 0.1 kWh, low word at the first register.
+AC_OUT_ENERGY = 152       # AC output energy
+PV_CHG_ENERGY = 154       # solar / DC-input charging energy
+GRID_CHG_ENERGY = 156     # grid (mains) charging energy
+ENERGY_COUNTERS = (AC_OUT_ENERGY, PV_CHG_ENERGY, GRID_CHG_ENERGY)
 AC_OUT_DV = 1431          # volts x10
 AC_OUT_FREQ_DHZ = 1500    # Hz x10
 CTRL_AC, CTRL_DC = 2011, 2012
@@ -42,7 +46,8 @@ _IDLE = {
 }
 
 # Registers derived from the others on every read, never stored directly.
-_DERIVED = {103, 105, 124, 140, 142, 148, 149, 161, 169, 1314, 1315, 1400,
+_DERIVED = {103, 105, 124, 140, 142, 148, 149, 152, 153, 154, 155, 156, 157,
+            161, 169, 1314, 1315, 1400,
             1420, 1432, 1511}
 
 
@@ -66,12 +71,14 @@ class Registers:
             self._r[116 + i] = (serial >> (16 * i)) & 0xFFFF
         self._r.update({
             SOC: 80, TIME_REMAINING: 0, DC_OUT_W: 0, AC_OUT_W: 0, DC_IN_W: 0,
-            AC_IN_W: 0, REG_156: 24, AC_OUT_DV: 2300, AC_OUT_FREQ_DHZ: 500,
+            AC_IN_W: 0, AC_OUT_DV: 2300, AC_OUT_FREQ_DHZ: 500,
             CTRL_AC: 1, CTRL_DC: 1, DC_ECO: 0, AC_ECO: 0, CHARGE_MODE: 0,
             POWER_LIFT: 0, SCREEN_TIMEOUT: 3, CHARGE_LIMIT: 100 << 8,
             GRID_CHARGE_A: 3,
         })
         self._pending = []            # (due, addr, value) writes not yet committed
+        # Lifetime energy in kWh, keyed by the counter's first register.
+        self._energy = {AC_OUT_ENERGY: 41.3, PV_CHG_ENERGY: 12.8, GRID_CHG_ENERGY: 6.2}
         self._soc_f = float(self._r[SOC])
         self.commit_delay = 0.4       # seconds from a write's echo to its commit
         self.simulate_battery = False
@@ -87,6 +94,14 @@ class Registers:
             self._r[addr] = int(value) & 0xFFFF
             if addr == SOC:
                 self._soc_f = float(self._r[SOC])
+
+    def get_energy(self, addr):
+        with self._lock:
+            return self._energy[addr]
+
+    def set_energy(self, addr, kwh):
+        with self._lock:
+            self._energy[addr] = max(0.0, float(kwh))
 
     # ---- BLE side ---------------------------------------------------------
     def read(self, addr, qty):
@@ -121,8 +136,14 @@ class Registers:
                 self.on_commit(addr, value)
 
     def tick(self, dt):
-        """Advance the battery model by dt seconds (when enabled)."""
+        """Advance the energy counters, and the battery model when enabled,
+        by dt seconds."""
         self.commit_due()
+        with self._lock:
+            hours = dt / 3600
+            self._energy[AC_OUT_ENERGY] += self._ac_out() * hours / 1000
+            self._energy[PV_CHG_ENERGY] += self._r[DC_IN_W] * hours / 1000
+            self._energy[GRID_CHG_ENERGY] += self._r[AC_IN_W] * hours / 1000
         if not self.simulate_battery:
             return
         with self._lock:
@@ -153,6 +174,10 @@ class Registers:
         if a not in _DERIVED:
             return self._r.get(a, 0)
         ac_in, ac_out, dc_out = self._r[AC_IN_W], self._ac_out(), self._dc_out()
+        if 152 <= a <= 157:  # 32-bit energy counters, 0.1 kWh, low word first
+            base = a - (a - 152) % 2
+            tenths = min(int(self._energy[base] * 10), 0xFFFFFFFF)
+            return tenths & 0xFFFF if a == base else tenths >> 16
         if a in (140, 1400):
             return dc_out
         if a in (142, 1420):

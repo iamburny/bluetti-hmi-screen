@@ -340,12 +340,59 @@ be logged against the power flows until it's identified. The "High Temp"
 warning that used to key off it was removed. Same lesson as reg 148: a
 plausible-looking delta isn't confirmation.
 
+**Likely identity (pending a live test):** the low word of the lifetime
+grid-charging energy counter -- see "Lifetime energy counters" below. Every
+value above only ever rose, and the August readings came from sessions that
+included mains charging. The falsifying test: charge from mains for ~15 min at
+~1.2 kW (~0.3 kWh) and 156 should rise by ~3; a load with no charging should
+leave it unchanged.
+
 Other registers that changed in the same diff, for reference (not wired to
 anything): `100` 1000→1013 (drifts even at idle, looks like a counter), `101`
 2→732 (large jump, maybe a duration/energy accumulator), `188` 0→209
 (unclear), `2003` 4916→5915 (the already-unidentified pack/cell register,
 +999), `148` 65535→64745 (the already-known unused/−1 sentinel register, now
 reading roughly −791 signed — plausibly a net power-flow value, unconfirmed).
+
+## Lifetime energy counters (2026-09)
+
+From the community V2 register map in
+[`nhurman/bluetti_mqtt`](https://github.com/nhurman/bluetti_mqtt)
+(`bluetti_mqtt/core/devices/v2_device.py`). That map counts **byte** offsets
+from the start of each block (`DeviceStruct(chunk_size=1)`), so register =
+block start + offset / 2. Its `HOME_DATA` block starts at 100, and its offsets
+land exactly on registers we'd already verified here (SoC 102, time 104, watts
+140/142/144/146), which is why the rest of it is worth trusting as a lead.
+
+32-bit counters, **low word at the first register**, 0.1 kWh units:
+
+| Regs | Field (their name) | Notes |
+|---|---|---|
+| 150/151 | DC output energy (`total_dc_energy`) | not read |
+| **152/153** | **AC output energy** (`total_ac_energy`) | explains reg 152 "only ever creeping upward" |
+| **154/155** | **Solar / DC-input charging energy** (`total_pv_charging_energy`) | other libs call 154 "power generation" |
+| **156/157** | **Grid charging energy** (`total_grid_charging_energy`) | reg 156 above |
+| 158/159 | Grid feedback energy (`total_feedback_energy`) | not read |
+| 167/168 | Battery discharge energy (`pack_dsg_energy_total`) | the "slowly rising counter" at 167 |
+
+The firmware reads 152-157 as one block in the slow poll tier into
+`power.acOutEnergy` / `pvChgEnergy` / `gridChgEnergy` and shows them on the
+**Lifetime Energy** page (kWh button on Bluetti Settings). None of the three is
+verified on the unit yet -- treat them as the V2 map's names until the
+charge test above passes.
+
+Other leads from the same map, not yet checked here:
+- **6000-6030 (`PACK_MAIN_INFO`)**: pack voltage/current, `pack_soh` (health
+  %), `pack_avg_temp` (commented "Fahrenheit?"). Outside the 0-6000 wide
+  sweep, so never read -- the best lead for a real battery temperature.
+- **105** = time to empty and **104** = time to full (the firmware currently
+  uses 104 for both directions).
+- **123** = power-flow bitmask (grid/PV to battery, AC/DC load, icon flags).
+- **124** = control-status bitmask (bit1 AC, bit2 DC, bit9 ECO, ...).
+- **1303/1304** = a second grid-charge energy counter, an independent check
+  on 156/157.
+- Doesn't fit: its `pack_voltage` at reg 100 would read 9.96 V here, and its
+  5 V/12 V/24 V DC rail breakdown (1404-1409) didn't move under USB loads.
 
 ## Sleep / standby (2026-06-25)
 
@@ -432,10 +479,10 @@ Full-height, no status bar — this is the app's home screen.
 - Settings gear in the gap between `AC IN` and `AC OUT` -> Bluetti Settings.
 - Bluetooth link icon (flashes while connecting) only shown on the "Bluetti
   offline" state — the only time link status isn't otherwise visible.
-- Bluetti Settings carries a top utility row — history chart + **release-for-
-  app** (phone icon, 90 s window with countdown) — always available
-  regardless of connection state, above the ECO/charge-limit/timeout/pairing
-  rows that need live data.
+- Bluetti Settings carries a top utility row — history chart, **release-for-
+  app** (phone icon, 90 s window with countdown) and **kWh** (Lifetime Energy
+  page) — always available regardless of connection state, above the
+  ECO/charge-limit/timeout/pairing rows that need live data.
 
 ## Tests
 

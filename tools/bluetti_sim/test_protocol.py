@@ -180,3 +180,21 @@ def test_output_off_zeroes_its_watts(linked):
     regs.set(R.AC_OUT_W, 500)
     regs.set(R.CTRL_AC, 0)
     assert parse_read(modbus(dev, cli, cli.read_cmd(142, 1)), 1) == [0]
+
+
+def test_energy_counters_decode_like_the_firmware(linked):
+    regs, dev, cli = linked
+    regs.set_energy(R.AC_OUT_ENERGY, 41.3)
+    regs.set_energy(R.PV_CHG_ENERGY, 12.8)
+    regs.set_energy(R.GRID_CHG_ENERGY, 7000.4)  # > 6553.5 kWh, so the high word is used
+    w = parse_read(modbus(dev, cli, cli.read_cmd(152, 6)), 6)
+    # bluetti.cpp: value = (w[n+1] << 16) | w[n], in 0.1 kWh
+    assert [(w[i + 1] << 16) | w[i] for i in (0, 2, 4)] == [413, 128, 70004]
+
+
+def test_energy_counters_build_from_power_flow():
+    regs = R.Registers()
+    regs.set_energy(R.GRID_CHG_ENERGY, 0)
+    regs.set(R.AC_IN_W, 1200)
+    regs.tick(3600)  # one hour at 1200 W
+    assert abs(regs.get_energy(R.GRID_CHG_ENERGY) - 1.2) < 1e-9

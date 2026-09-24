@@ -12,3 +12,11 @@ managed_components/
 dependencies.lock
 sdkconfig
 sdkconfig.*
+
+# Local flash dumps of screens (vendor firmware; not for the repo)
+backups/
+
+# PC simulator venv and test caches
+tools/bluetti_sim/.venv/
+tools/bluetti_sim/.pytest_cache/
+**/__pycache__/

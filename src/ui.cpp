@@ -311,6 +311,13 @@ static void drawChargeModeButton() {
   drawChargeModeIcon(power.chargeMode, x + w / 2, y + h / 2, c);
 }
 
+// Marks a simulator build so it's never mistaken for a live Bluetti link.
+static void drawSimTag(int16_t cx, int16_t cy) {
+#if BLUETTI_SIM
+  drawCenteredText("SIM", cx, cy, 2, COL_WARN);
+#endif
+}
+
 // Power monitor: a central battery ring gauge (SoC % + remaining time) framed
 // by four corner cards — DC/AC input (top) and DC/AC output (bottom), plus
 // AC/DC output toggles. Full-height (no status bar); the grid-connected icon
@@ -351,6 +358,7 @@ static void drawPowerScreen() {
                          ? "Connecting to the Bluetti..."
                          : "Searching for the Bluetti...",
                      W / 2, H / 2 + 6, 2, COL_MUTED);
+    drawSimTag(W / 2, H / 2 + 44);
     return;
   }
 
@@ -372,6 +380,7 @@ static void drawPowerScreen() {
     const int16_t rightCx = W - 10 - 140 / 2;                   // matches powerCardRect's m/w
     const int16_t gapMidY = (10 + 80 + (H - 10 - 80)) / 2;      // matches the card-gap math
     iconPlug(rightCx, gapMidY, power.gridConnected ? COL_ON : COL_MUTED);
+    drawSimTag(10 + 140 / 2, gapMidY);  // the otherwise-empty left gap
   }
 
   // Charging / discharging / idle status, top-centre. Pulses while charging.

@@ -31,6 +31,11 @@ pio run -e jc3248w535 -t upload -t monitor
 pio test -e native
 ```
 
+`tools/bluetti_sim/` is a PC-side fake Elite 300 (Windows GATT peripheral plus a
+tkinter panel). It only pairs with the `jc3248w535_sim` env (`-DBLUETTI_SIM=1`),
+which checks the device signature against the public half of L1 instead of K2.
+See that folder's README for setup, flashing, and flashing back.
+
 CI (`.github/workflows/test.yml`) runs `pio test -e native` on every push/PR
 (gcc preinstalled on the runner; no local toolchain needed).
 

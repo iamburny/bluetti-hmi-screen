@@ -47,6 +47,9 @@ static File g_logf;
 static char g_logPath[40] = "";
 
 static void logToSd(const PwrSample &s) {
+#if BLUETTI_SIM
+  return;  // simulated data stays out of the real history log
+#endif
   if (!sd_begin()) return;
 
   const char *path = "/logs/power.csv";
@@ -120,6 +123,9 @@ static void replaySdFile(const char *path) {
 // Restore history from /logs/power.csv at boot. The ring keeps only the last
 // RING_N samples (~24h).
 static void loadFromSd() {
+#if BLUETTI_SIM
+  return;  // chart shows only this session's simulated samples
+#endif
   if (!ring || !sd_begin()) return;
   if (SD_MMC.exists("/logs/power.csv")) replaySdFile("/logs/power.csv");
   Serial.printf("[powerlog] restored %d samples from SD\n", count);

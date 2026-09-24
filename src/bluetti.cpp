@@ -148,15 +148,28 @@ bool bluetti_take_learned_mac(char *out, size_t n) {
 
 // Resolve the Elite 300's address: a saved MAC (fast), else a 5s scan by name
 // prefix, remembering what it finds so the next connect can skip the scan.
+//
+// Sim build: always scans, never learns, and matches on the Bluetti service
+// rather than the name -- a Windows GATT server can't set its advertised name,
+// and the real unit's saved MAC must survive a round trip through this build.
 static NimBLEAddress resolveAddr() {
+#if !BLUETTI_SIM
   if (strlen(settings.bluettiMac) >= 17 && g_connFails < MAC_FALLBACK_FAILS)
     return NimBLEAddress(std::string(settings.bluettiMac), BLE_ADDR_PUBLIC);
+#endif
 
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setActiveScan(true);
   NimBLEScanResults res = scan->getResults(5000, false);
   for (int i = 0; i < res.getCount(); i++) {
     const NimBLEAdvertisedDevice* d = res.getDevice(i);
+#if BLUETTI_SIM
+    // Skip the real unit if it's in range -- it can't pass the sim handshake.
+    if (d->isAdvertisingService(NimBLEUUID(SVC_UUID)) &&
+        !String(d->getName().c_str()).startsWith(DEVNAME_PREFIX))
+      return d->getAddress();
+    continue;
+#endif
     if (String(d->getName().c_str()).startsWith(DEVNAME_PREFIX)) {
       NimBLEAddress a = d->getAddress();
       std::string s = a.toString();

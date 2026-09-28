@@ -22,6 +22,9 @@ class BluettiCrypt {
 
   void reset();
   bool isReady() const { return ready_; }
+  // Which candidate split verified the peer's signature in the last key
+  // exchange (0 = plain r||s, see logic/bluetti_sig.h), or -1 if none did.
+  int sigSplitUsed() const { return sigSplit_; }
 
   int handle(const uint8_t* data, size_t len, std::vector<uint8_t>& out,
              std::vector<uint8_t>& plain);
@@ -35,6 +38,7 @@ class BluettiCrypt {
  private:
   bool unsecureSet_ = false;
   bool ready_ = false;
+  int sigSplit_ = -1;
   uint8_t unsecKey_[16];
   uint8_t unsecIv_[16];
   uint8_t secKey_[32];

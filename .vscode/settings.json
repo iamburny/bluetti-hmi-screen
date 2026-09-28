@@ -1,0 +1,7 @@
+{
+  "clangd.path": "C:\\Users\\matt\\.platformio\\packages\\tool-clangd-esp\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--compile-commands-dir=c:/Users/matt/Documents/Projects/bluetti-hmi-screen/.cache/clangd",
+    "--query-driver=C:/Users/matt/.platformio/packages/toolchain-*/bin/*,C:/Users/matt/.platformio/packages/tool-*/bin/*"
+  ]
+}

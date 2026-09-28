@@ -29,7 +29,10 @@ telemetry (SoC, watts, AC voltage and frequency). The controls on
 the right are the registers the HMI writes; a tap on the screen flips them here
 once the unit's commit delay has passed (0.4 s, same as the real Elite 300).
 The lifetime energy counters (grid charging, solar/DC charging, AC output) build
-up from the power flows; type a kWh value and press Enter to set one.
+up from the power flows; type a kWh value and press Enter to set one. The
+"ECO & limits" panel drives the values the HMI's read-only ECO & Limits page
+shows (ECO timers and thresholds, SoC range, working mode, and register 2075
+as a raw number).
 "Simulate battery" moves SoC and time remaining from the net power and the
 unit's 3024 Wh capacity. "Disconnect client" drops the link so the HMI's
 reconnect path runs.

@@ -48,6 +48,7 @@ uint32_t bluetti_poll_ms() { return g_pollMs; }
 
 void bluetti_stats_reset() {
   g_stats.polls = g_stats.retries = g_stats.failures = g_stats.linkDrops = 0;
+  g_stats.handshakes = g_stats.handshakeFails = g_stats.altSigSplits = 0;
   g_stats.avgPollMs = 0;
 }
 
@@ -66,6 +67,8 @@ static const uint16_t REG_CTRL_DC = 2012;
 #define SLOW_EVERY 10
 struct SlowCache {
   uint32_t acOutEnergy, pvChgEnergy, gridChgEnergy;
+  int dcEcoHours, dcEcoMinW, acEcoHours, acEcoMinW, socLow, socHigh,
+      socFloorRaw, workMode;
   int reg156, acOutDV, acOutFreqDHz, chargeMode, gridChargeA, chargeLimit,
       screenTimeout;
   bool acEco, dcEco, powerLift;
@@ -249,9 +252,12 @@ static bool connectAndHandshake() {
   }
   if (!g_crypt.isReady()) {
     BDBG("[bluetti] handshake failed\n");
+    g_stats.handshakeFails++;
     dropLink();
     return false;
   }
+  g_stats.handshakes++;
+  if (g_crypt.sigSplitUsed() > 0) g_stats.altSigSplits++;
   BDBG("[bluetti] secure link established\n");
   g_forceFull = true;  // fresh link -- re-read the slow tier, don't trust cache
   // Stay BTC_CONNECTING until the first successful telemetry read (in poll());
@@ -537,15 +543,31 @@ static bool poll() {
     }
     if (readRegs(1431, 1, w, 1) == 1) g_slow.acOutDV = w[0];     // AC out V x10
     if (readRegs(1500, 1, w, 1) == 1) g_slow.acOutFreqDHz = w[0];
-    if (readRegs(2020, 1, w, 1) == 1) g_slow.chargeMode = w[0];  // 0/1/2/4 mode
     if (readRegs(2214, 1, w, 1) == 1) g_slow.gridChargeA = w[0]; // custom grid A
-    if (readRegs(2017, 1, w, 1) == 1) g_slow.acEco = (w[0] != 0);
-    if (readRegs(2014, 1, w, 1) == 1) g_slow.dcEco = (w[0] != 0);
-    if (readRegs(2021, 1, w, 1) == 1) g_slow.powerLift = (w[0] != 0);
+    // Config block 2014-2023: ECO switches, timers and thresholds, charge
+    // mode, power lifting, SoC limits -- one read instead of one per field.
+    uint16_t cfg[10];
+    bool cfgOk = readRegs(2014, 10, cfg, 10) == 10;
+    if (cfgOk) {
+      g_slow.dcEco = (cfg[0] != 0);         // 2014
+      g_slow.dcEcoHours = cfg[1];           // 2015
+      g_slow.dcEcoMinW = cfg[2];            // 2016
+      g_slow.acEco = (cfg[3] != 0);         // 2017
+      g_slow.acEcoHours = cfg[4];           // 2018
+      g_slow.acEcoMinW = cfg[5];            // 2019
+      g_slow.chargeMode = cfg[6];           // 2020: 0/1/2/4
+      g_slow.powerLift = (cfg[7] != 0);     // 2021
+      g_slow.socLow = cfg[8];               // 2022
+      g_slow.socHigh = cfg[9];              // 2023
+    }
+    if (readRegs(2005, 1, w, 1) == 1) g_slow.workMode = w[0];
+    if (readRegs(2075, 1, w, 1) == 1) g_slow.socFloorRaw = w[0];
     if (readRegs(2083, 1, w, 1) == 1) g_slow.chargeLimit = w[0] >> 8;  // % in hi byte
     if (readRegs(2067, 1, w, 1) == 1) g_slow.screenTimeout = w[0];
     g_slow.valid = true;
-    g_forceFull = false;
+    // A write to one of these toggles sets g_forceFull; keep re-reading until
+    // the block actually lands, so the confirmed value isn't left stale.
+    g_forceFull = !cfgOk;
   }
   g_slowTick++;
 
@@ -562,6 +584,14 @@ static bool poll() {
   tmp.powerLift = g_slow.powerLift;
   tmp.chargeLimit = g_slow.chargeLimit;
   tmp.screenTimeout = g_slow.screenTimeout;
+  tmp.dcEcoHours = g_slow.dcEcoHours;
+  tmp.dcEcoMinW = g_slow.dcEcoMinW;
+  tmp.acEcoHours = g_slow.acEcoHours;
+  tmp.acEcoMinW = g_slow.acEcoMinW;
+  tmp.socLow = g_slow.socLow;
+  tmp.socHigh = g_slow.socHigh;
+  tmp.socFloorRaw = g_slow.socFloorRaw;
+  tmp.workMode = g_slow.workMode;
 
   tmp.charging = (tmp.dcInW + tmp.acInW) > (tmp.dcOutW + tmp.acOutW);
   tmp.whRemaining = 0;

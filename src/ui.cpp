@@ -9,7 +9,7 @@
 #include "logic/geom.h"
 
 // ===== Model ================================================================
-enum Screen { POWER, POWER_CHART, BT_SETTINGS, DIAGNOSTICS, ENERGY };
+enum Screen { POWER, POWER_CHART, BT_SETTINGS, DIAGNOSTICS, ENERGY, ECO_LIMITS };
 
 // Which field the keyboard is currently editing (so we can store on commit).
 enum EditTarget { EDIT_NONE, EDIT_BTMAC };
@@ -200,8 +200,8 @@ static void powerChargeBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   x = gfx->width() / 2 + 6;  // right of centre
 }
 
-// Top-of-screen utility row on the Bluetti Settings page: history, app-release
-// and lifetime energy, left to right. Always available regardless of
+// Top-of-screen utility row on the Bluetti Settings page: history, app-release,
+// lifetime energy and ECO & limits, left to right. Always available regardless of
 // connection state, so callers must draw/handle these before any
 // power_valid() gate.
 static const int16_t BT_BTN_Y = 8;
@@ -216,6 +216,10 @@ static void btReleaseBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
 static void btEnergyBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
   w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
   x = gfx->width() / 2 + 6 + PWR_BTN_W + 12;  // right of app-release
+}
+static void btEcoBtnRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+  w = PWR_BTN_W; h = PWR_BTN_H; y = BT_BTN_Y;
+  x = gfx->width() / 2 + 6 + 2 * (PWR_BTN_W + 12);  // right of lifetime energy
 }
 
 // Back button, top-left of the sub-pages. Swipe-back still works, but tap
@@ -262,6 +266,13 @@ static void drawEnergyButton() {
   gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
   gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
   drawCenteredText("kWh", x + w / 2, y + h / 2, 2, ACC_LIGHTS);
+}
+static void drawEcoButton() {
+  int16_t x, y, w, h;
+  btEcoBtnRect(x, y, w, h);
+  gfx->fillRoundRect(x, y, w, h, 8, COL_TILE);
+  gfx->drawRoundRect(x, y, w, h, 8, COL_MUTED);
+  drawCenteredText("ECO", x + w / 2, y + h / 2, 2, COL_ON);
 }
 static void drawReleaseButton(int rem) {
   int16_t x, y, w, h;
@@ -767,6 +778,7 @@ static void drawBtSettings() {
   drawChartButton();
   drawReleaseButton((int)bluetti_release_remaining());
   drawEnergyButton();
+  drawEcoButton();
 
   // Don't show/allow editing the rest of the controls until live data has
   // arrived.
@@ -840,6 +852,55 @@ static void drawEnergyScreen() {
   drawEnergyRow(2, "AC output", power.acOutEnergy);
   drawCenteredText("Totals kept by the Bluetti (regs 152-157)", W / 2, H - 22, 1,
                    COL_MUTED);
+}
+
+// ===== ECO & limits page (ECO button on Bluetti Settings) ===================
+// Read-only view of settings found in other Bluetti register maps. Their
+// value formats aren't confirmed on the Elite 300 yet, so raw numbers are
+// shown alongside the likely meaning and nothing here writes.
+static const char *workModeLabel(int m) {
+  switch (m) {
+    case 1: return "Customised";
+    case 2: return "PV priority";
+    case 3: return "Standard";
+    case 4: return "Time control";
+    default: return "?";
+  }
+}
+
+static void drawInfoRow(int i, const char *label, const char *value) {
+  const int16_t y = 44 + i * 38, h = 34;
+  gfx->fillRoundRect(nameRowX, y, nameRowW, h, 8, COL_TILE);
+  drawText(label, nameRowX + 14, y + (h - 16) / 2, 2, COL_TEXT);
+  int16_t vw, vh;
+  measureText(value, 2, vw, vh);
+  drawText(value, nameRowX + nameRowW - 14 - vw, y + (h - vh) / 2, 2, COL_TEXT);
+}
+
+static void drawEcoScreen() {
+  const int16_t W = gfx->width(), H = gfx->height();
+  gfx->fillScreen(COL_BG);
+  drawBackButton();
+  drawText("ECO & Limits (read-only)", 62, 14, 2, COL_TEXT);
+  if (!power_valid()) {
+    drawCenteredText("Connecting to the Bluetti...", W / 2, H / 2, 2, COL_MUTED);
+    return;
+  }
+  char v[32];
+  snprintf(v, sizeof(v), "%d h / %d W", power.acEcoHours, power.acEcoMinW);
+  drawInfoRow(0, "AC ECO off after", v);
+  snprintf(v, sizeof(v), "%d h / %d W", power.dcEcoHours, power.dcEcoMinW);
+  drawInfoRow(1, "DC ECO off after", v);
+  snprintf(v, sizeof(v), "%d%% - %d%%", power.socLow, power.socHigh);
+  drawInfoRow(2, "SoC range (2022/23)", v);
+  snprintf(v, sizeof(v), "%d (0x%04X)", power.socFloorRaw, power.socFloorRaw);
+  drawInfoRow(3, "SoC set low (2075)", v);
+  snprintf(v, sizeof(v), "%d%%", power.chargeLimit);
+  drawInfoRow(4, "Charge limit (2083)", v);
+  snprintf(v, sizeof(v), "%d %s", power.workMode, workModeLabel(power.workMode));
+  drawInfoRow(5, "Working mode (2005)", v);
+  drawCenteredText("Meanings from other models' maps - not yet confirmed here",
+                   W / 2, H - 12, 1, COL_MUTED);
 }
 
 // ===== Diagnostics page (hidden: long-press the gear) ======================
@@ -926,8 +987,15 @@ static void drawDiagnostics() {
   drawText(l1, 8, 110, 1, saturated ? ACC_LIGHTS : COL_TEXT);
   drawText(l2, 8, 128, 1, st.lastRetries || st.lastFailures ? COL_WARN : COL_TEXT);
   drawText(l3, 8, 146, 1, st.linkDrops ? COL_WARN : COL_MUTED);
+  // Key exchanges: "alt sig" counts the ones that only verified with a
+  // shortened r/s signature split (see logic/bluetti_sig.h).
+  char l4[72];
+  snprintf(l4, sizeof(l4), "handshakes %lu   failed %lu   alt sig %lu",
+           (unsigned long)st.handshakes, (unsigned long)st.handshakeFails,
+           (unsigned long)st.altSigSplits);
+  drawText(l4, 8, 164, 1, st.handshakeFails ? COL_WARN : COL_MUTED);
 
-  gfx->drawFastHLine(8, 162, W - 16, COL_TILE);
+  gfx->drawFastHLine(8, 182, W - 16, COL_TILE);
   drawText("tap = reset counters    swipe right = back", 8, H - 14, 1, COL_OFF);
 
   // --- Register changes (only meaningful with the sweep on) ----------------
@@ -943,18 +1011,18 @@ static void drawDiagnostics() {
   snprintf(hdr, sizeof(hdr), "%d regs / %lums sweep   %d change%s",
            bluetti_diag_scanned(), (unsigned long)bluetti_diag_scan_ms(),
            bluetti_diag_count(), bluetti_diag_count() == 1 ? "" : "s");
-  drawText(hdr, 8, 172, 1, COL_TEXT);
+  drawText(hdr, 8, 188, 1, COL_TEXT);
 
   int n = bluetti_diag_count();
   if (n == 0) {
     drawCenteredText(bluetti_diag_scanned() ? "No changes since baseline"
                                             : "Scanning...",
-                     W / 2, 210, 2, COL_MUTED);
+                     W / 2, 226, 2, COL_MUTED);
     return;
   }
 
   // Two columns of changes, newest first.
-  const int16_t rowH = 18, top = 190, perCol = 6;
+  const int16_t rowH = 17, top = 206, perCol = 6;
   if (n > perCol * 2) n = perCol * 2;
   for (int i = 0; i < n; i++) {
     const RegChange &c = bluetti_diag_at(i);
@@ -1013,6 +1081,7 @@ void ui_draw() {
     case BT_SETTINGS: drawBtSettings(); break;
     case DIAGNOSTICS: drawDiagnostics(); break;
     case ENERGY: drawEnergyScreen(); break;
+    case ECO_LIMITS: drawEcoScreen(); break;
   }
   if (g_writePending && (current == POWER || current == BT_SETTINGS))
     drawPendingSpinner();
@@ -1102,6 +1171,24 @@ void ui_tick() {
       lastFlags = flags;
       lastTtf = power.ttfMin;
       if (pulseTick) lastPulse = millis();
+      ui_draw();
+    }
+    return;
+  }
+
+  // ECO & limits: repaint when any shown value changes or the link toggles.
+  if (current == ECO_LIMITS) {
+    static int last[9] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    static bool lastValid = false;
+    const int now[9] = {power.acEcoHours, power.acEcoMinW, power.dcEcoHours,
+                        power.dcEcoMinW,  power.socLow,    power.socHigh,
+                        power.socFloorRaw, power.chargeLimit, power.workMode};
+    bool pv = power_valid();
+    bool changed = pv != lastValid;
+    for (int i = 0; i < 9; i++) changed |= now[i] != last[i];
+    if (changed) {
+      for (int i = 0; i < 9; i++) last[i] = now[i];
+      lastValid = pv;
       ui_draw();
     }
     return;
@@ -1325,6 +1412,12 @@ void ui_handle_touch(int16_t x, int16_t y) {
         ui_draw();
         return;
       }
+      btEcoBtnRect(bx, by, bw, bh);
+      if (inRect(x, y, bx, by, bw, bh)) {
+        current = ECO_LIMITS;
+        ui_draw();
+        return;
+      }
     }
     if (!power_valid()) return;  // remaining controls disabled until live data arrives
     struct { int reg; bool *val; } rows[3] = {
@@ -1375,8 +1468,9 @@ void ui_handle_touch(int16_t x, int16_t y) {
     return;
   }
 
-  // Lifetime energy: back returns to Bluetti Settings, where it was opened.
-  if (current == ENERGY) {
+  // Lifetime energy and ECO & limits: back returns to Bluetti Settings, where
+  // they were opened.
+  if (current == ENERGY || current == ECO_LIMITS) {
     int16_t bx, by, bw, bh;
     backBtnRect(bx, by, bw, bh);
     if (inRect(x, y, bx, by, bw, bh)) {

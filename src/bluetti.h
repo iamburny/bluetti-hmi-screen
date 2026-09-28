@@ -55,6 +55,10 @@ struct BluettiStats {
   uint32_t retries;       // lifetime retried reads
   uint32_t failures;      // lifetime failed reads
   uint32_t linkDrops;     // lifetime forced reconnects
+  uint32_t handshakes;    // key exchanges completed
+  uint32_t handshakeFails;  // key exchanges that failed after connecting
+  uint32_t altSigSplits;  // of the completed ones, how many needed a
+                          // non-plain signature split (logic/bluetti_sig.h)
 };
 const BluettiStats &bluetti_stats();
 

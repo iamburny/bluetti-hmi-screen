@@ -24,6 +24,16 @@ struct PowerData {
   uint32_t acOutEnergy;    // AC output energy (regs 152/153)
   uint32_t pvChgEnergy;    // solar / DC-input charging energy (regs 154/155)
   uint32_t gridChgEnergy;  // grid (mains) charging energy (regs 156/157)
+  // ECO timers/thresholds and SoC limits, shown read-only until their formats
+  // are confirmed on the unit (see docs/BLUETTI.md "Settings from forks").
+  int dcEcoHours;  // DC ECO auto-off time, 1-4 h (reg 2015)
+  int dcEcoMinW;   // DC ECO power threshold, W per the EP2000 map (reg 2016)
+  int acEcoHours;  // AC ECO auto-off time, 1-4 h (reg 2018)
+  int acEcoMinW;   // AC ECO power threshold (reg 2019)
+  int socLow;      // system SoC low limit, % (reg 2022)
+  int socHigh;     // system SoC high limit, % (reg 2023)
+  int socFloorRaw; // "SoC set low" (reg 2075), raw: format unknown
+  int workMode;    // working mode (reg 2005), raw enum
   int acOutDV;   // AC output voltage, deci-volts (reg 1431; /10 = volts)
   int chargeMode;  // 0=Standard, 1=Silent, 2=Turbo, 4=Custom (reg 2020)
   int gridChargeA; // Custom max grid charging current, A (reg 2214)

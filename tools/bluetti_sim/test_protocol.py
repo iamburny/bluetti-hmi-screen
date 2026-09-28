@@ -63,7 +63,13 @@ class HmiClient:
         return 3, None, dec
 
     def _on_peer_pubkey(self, p):
-        if not verify_raw(self.verify_key, p[64:128], p[:64] + self.unsec_iv):
+        # Same candidate r/s splits as include/logic/bluetti_sig.h.
+        sig, signed = p[64:128], p[:64] + self.unsec_iv
+        splits = [(32, 32, 32)] + ([(31, 31, 32), (32, 32, 31)] if sig[63] == 0 else [])
+        if not any(verify_raw(self.verify_key,
+                              sig[:rl].rjust(32, b"\0") + sig[so:so + sl].rjust(32, b"\0"),
+                              signed)
+                   for rl, so, sl in splits):
             return -1, None, None
         self.peer = pub_from64(p[:64])
         self.my = ec.generate_private_key(ec.SECP256R1())

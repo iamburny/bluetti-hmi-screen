@@ -8,6 +8,55 @@ way the HMI already controls the Elite 300's AC/DC outputs.
 to run **out at the van where the Charger 2 is fitted**, with the device powered and
 the engine running (it only accepts control while the alternator/D+ signal is live).
 
+## Update (2026-09): the register map is now public
+
+The "no shortcut" section below is out of date. What's now known:
+
+- **Same stack as the Elite 300.** Open PR
+  [Patrick762/bluetti-bt-lib#85](https://github.com/Patrick762/bluetti-bt-lib/pull/85)
+  (device file: [`sidieje/bluetti-bt-lib` `charger2.py`](https://github.com/sidieje/bluetti-bt-lib/blob/main/bluetti_bt_lib/devices/charger2.py))
+  reads two real Charger 2 units over the V2 encrypted protocol at **Modbus slave
+  address 1**. Advertised name pattern `CHARGER2<serial>`; the MAC looked like an
+  Espressif (ESP32) address. Reported firmware: IOT v8036.14, ARM v30041.01.19.
+- **Live-verified read registers** (from that PR):
+
+  | Reg | Field | Scale |
+  |---|---|---|
+  | 15500-15505 | device type, ASCII "CHARGER 2" | |
+  | 15506 | serial number | |
+  | 15531 / 15532 / 15534 | solar V / A / W | 0.1 V / 0.01 A / W |
+  | 15535 / 15536 / 15538 | PPS output V / A / W | same |
+  | 15539 / 15540 / 15542 | car (starter) battery V / A / W | same |
+  | 15543 / 15546 | power-station battery V / W | W signed |
+  | 15584 | power-station SoC | % |
+
+- **The wider 15500 / 15600 layout** (from the leaked firmware source in
+  `tab-liu/ble_gui`, which matches the PR everywhere they overlap; record the
+  facts, don't copy its code):
+  - 15514 energy-flow bits; 15515 battery type (1 = 12 V lead-acid, 2 = 24 V);
+    15516-15525 faults and alarms; 15526 work mode (bit 0 working, bit 2 PV
+    online, bits 3-6 mode); 15527-15530 total input / output W (int32);
+    15531-15554 DC1-DC6 as V (0.1 V), I (int32, 0.01 A), P (W); 15555 onward
+    energy counters (0.1 kWh).
+  - Settings block: **15600 bits 1:0 = DC output on/off, 1 = ON, 2 = OFF**
+    (Bluetti's 1/2 convention, read-modify-write); bits 3:2 silent mode;
+    15601-15612 per-port V/I setpoints; 15614-15615 per-port charge mode;
+    15618 battery type; 15619-15624 power setpoints; **15625 bits 5:4 charging
+    priority** (1 = starter battery first, 2 = storage first) and bits 13:12
+    maintenance mode; **15627 `SetCtrlPowerOn`** (possibly the same 1-4 encoding
+    as the Elite's 2013) and 15628 `Remote_set_soc`.
+- **Charge on/off is not yet hardware-verified.** Best candidates: 15600 bits 1:0
+  or 15627. The PR author found "no obvious Boolean toggle"; the app's System
+  On/Off changes several registers at once, which fits a 1/2-encoded bitfield.
+- **Through the Elite?** Bluetti's firmware has a (disabled) BLE-client mode for
+  a station to connect to a Charger 2 itself, and gateway firmware exposes
+  sub-devices at other slave addresses (DCDC 109-112). Nothing shows the Elite
+  300 doing this today, so the HMI should connect to the Charger 2 directly, as
+  a second BLE link.
+
+What this changes in the plan below: Step 1 is very likely a pass, and Step 2's
+sweep should start with the 15500-15650 blocks rather than 0-6000.
+
 > This doc is written to be self-contained so a **fresh Claude Code instance on the
 > laptop** can pick it up cold. Read alongside `HMI_Screen/docs/BLUETTI.md` (the full
 > protocol/crypto/register reference) — the Charger 2 almost certainly reuses that

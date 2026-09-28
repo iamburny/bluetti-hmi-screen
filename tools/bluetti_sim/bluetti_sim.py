@@ -13,11 +13,13 @@ from ble_server import BleServer
 from registers import (
     AC_ECO, AC_IN_W, AC_OUT_DV, AC_OUT_FREQ_DHZ, AC_OUT_W,
     CHARGE_LIMIT, CHARGE_MODE, CTRL_AC, CTRL_DC, DC_ECO, DC_IN_W, DC_OUT_W,
-    AC_OUT_ENERGY, GRID_CHARGE_A, GRID_CHG_ENERGY, POWER_LIFT, PV_CHG_ENERGY,
-    SCREEN_TIMEOUT, SOC, TIME_REMAINING, Registers)
+    AC_ECO_HOURS, AC_ECO_MIN_W, AC_OUT_ENERGY, DC_ECO_HOURS, DC_ECO_MIN_W,
+    GRID_CHARGE_A, GRID_CHG_ENERGY, POWER_LIFT, PV_CHG_ENERGY, SCREEN_TIMEOUT,
+    SOC, SOC_HIGH, SOC_LOW, SOC_SET_LOW, TIME_REMAINING, WORK_MODE, Registers)
 
 CHARGE_MODES = [("Standard", 0), ("Silent", 1), ("Turbo", 2), ("Custom", 4)]
 TIMEOUTS = [("30 s", 2), ("1 min", 3), ("5 min", 4), ("Never", 5)]
+WORK_MODES = [("Customised", 1), ("PV priority", 2), ("Standard", 3), ("Time control", 4)]
 PRESETS = {
     "Idle": {DC_OUT_W: 0, AC_OUT_W: 0, DC_IN_W: 0, AC_IN_W: 0},
     "Mains charging": {DC_OUT_W: 0, AC_OUT_W: 0, DC_IN_W: 0, AC_IN_W: 800},
@@ -31,7 +33,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("Bluetti Elite 300 simulator")
-        root.geometry("760x640")
+        root.geometry("820x800")
         self.regs = Registers()
         self.events = queue.Queue()
         self.regs.on_commit = lambda addr, value: self.events.put(
@@ -92,6 +94,18 @@ class App:
             self.energy[addr] = (var, entry)
         self._energy_shown = {}  # text last written to each entry
         self._refresh_energy()
+
+        # Settings the HMI's ECO & Limits page shows read-only.
+        eco = ttk.LabelFrame(left, text="ECO & limits (HMI shows read-only)")
+        eco.pack(fill="x", padx=6, pady=(8, 4))
+        self._slider(eco, "AC ECO hours", AC_ECO_HOURS, 1, 4)
+        self._slider(eco, "AC ECO min W", AC_ECO_MIN_W, 0, 100)
+        self._slider(eco, "DC ECO hours", DC_ECO_HOURS, 1, 4)
+        self._slider(eco, "DC ECO min W", DC_ECO_MIN_W, 0, 100)
+        self._slider(eco, "SoC low %", SOC_LOW, 0, 100)
+        self._slider(eco, "SoC high %", SOC_HIGH, 0, 100)
+        self._choice(eco, "Working mode", WORK_MODE, WORK_MODES)
+        self._raw_entry(eco, "SoC set low (raw)", SOC_SET_LOW)
 
         bar = ttk.Frame(root)
         bar.pack(fill="x", padx=10)
@@ -159,6 +173,28 @@ class App:
         box.bind("<<ComboboxSelected>>", lambda _e, a=addr: self._on_choice(a))
         self._show_choice(addr)
 
+    def _raw_entry(self, parent, label, addr):
+        """A register typed as a raw 0-65535 number (Enter or leaving applies)."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row, text=label, width=18).pack(side="left")
+        var = tk.StringVar(value=str(self.regs.get(addr)))
+        entry = ttk.Entry(row, textvariable=var, width=8)
+        entry.pack(side="left")
+
+        def apply(_e=None):
+            try:
+                text = var.get().strip().lower()
+                value = int(text, 16) if text.startswith("0x") else int(text)
+                self.regs.set(addr, max(0, min(0xFFFF, value)))
+            except ValueError:
+                pass
+            var.set(str(self.regs.get(addr)))
+
+        entry.bind("<Return>", apply)
+        entry.bind("<FocusOut>", apply)
+        self.vars[addr] = ("raw", var, entry)
+
     def _shown(self, addr, scale, decode):
         raw = self.regs.get(addr)
         if decode:
@@ -191,6 +227,8 @@ class App:
         self._updating = True
         try:
             for addr, spec in self.vars.items():
+                if isinstance(spec, tuple) and spec[0] == "raw":
+                    continue  # typed by hand; nothing else changes it
                 if isinstance(spec, tk.IntVar):
                     spec.set(1 if self.regs.get(addr) else 0)
                 elif isinstance(spec[0], tk.StringVar):

@@ -35,6 +35,12 @@ POWER_LIFT = 2021
 SCREEN_TIMEOUT = 2067     # 2 = 30 s, 3 = 1 min, 4 = 5 min, 5 = Never
 CHARGE_LIMIT = 2083       # percent in the high byte
 GRID_CHARGE_A = 2214
+# Settings named in other models' maps; the HMI shows these read-only.
+WORK_MODE = 2005          # 1 Customised, 2 PV priority, 3 Standard, 4 Time control
+DC_ECO_HOURS, DC_ECO_MIN_W = 2015, 2016
+AC_ECO_HOURS, AC_ECO_MIN_W = 2018, 2019
+SOC_LOW, SOC_HIGH = 2022, 2023
+SOC_SET_LOW = 2075        # format unknown on the Elite 300
 
 # Idle values seen on a real unit (docs/BLUETTI.md "Full dump"), so a
 # Diagnostics sweep on the HMI sees a plausible register map, not all zeros.
@@ -75,6 +81,8 @@ class Registers:
             CTRL_AC: 1, CTRL_DC: 1, DC_ECO: 0, AC_ECO: 0, CHARGE_MODE: 0,
             POWER_LIFT: 0, SCREEN_TIMEOUT: 3, CHARGE_LIMIT: 100 << 8,
             GRID_CHARGE_A: 3,
+            # Not yet read on a real unit; placeholders for the ECO & Limits page.
+            WORK_MODE: 3, SOC_SET_LOW: 20,
         })
         self._pending = []            # (due, addr, value) writes not yet committed
         # Lifetime energy in kWh, keyed by the counter's first register.

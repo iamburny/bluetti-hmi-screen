@@ -4,6 +4,7 @@
 #include "logic/touch_map.h"
 #include "logic/geom.h"
 #include "logic/modbus.h"
+#include "logic/bluetti_sig.h"
 #include <string.h>
 
 // Unity lifecycle hooks (required; no per-test setup needed here).
@@ -187,6 +188,33 @@ void test_bluetti_helpers() {
   TEST_ASSERT_EQUAL_INT(73, bluetti_clamp_soc(73));
 }
 
+void test_sig_splits_plain_when_no_pad() {
+  uint8_t sig[64];
+  memset(sig, 0xAB, sizeof(sig));
+  BluettiSigSplit c[3];
+  TEST_ASSERT_EQUAL_INT(1, bluetti_sig_splits(sig, c));
+  TEST_ASSERT_EQUAL_UINT8(32, c[0].rLen);
+  TEST_ASSERT_EQUAL_UINT8(32, c[0].sOff);
+  TEST_ASSERT_EQUAL_UINT8(32, c[0].sLen);
+}
+
+void test_sig_splits_all_three_when_padded() {
+  uint8_t sig[64];
+  memset(sig, 0xAB, sizeof(sig));
+  sig[63] = 0x00;
+  BluettiSigSplit c[3];
+  TEST_ASSERT_EQUAL_INT(3, bluetti_sig_splits(sig, c));
+  // plain, then r-shortened, then s-shortened; every split stays inside 64 bytes
+  TEST_ASSERT_EQUAL_UINT8(32, c[0].rLen);
+  TEST_ASSERT_EQUAL_UINT8(31, c[1].rLen);
+  TEST_ASSERT_EQUAL_UINT8(31, c[1].sOff);
+  TEST_ASSERT_EQUAL_UINT8(32, c[1].sLen);
+  TEST_ASSERT_EQUAL_UINT8(32, c[2].rLen);
+  TEST_ASSERT_EQUAL_UINT8(32, c[2].sOff);
+  TEST_ASSERT_EQUAL_UINT8(31, c[2].sLen);
+  for (int i = 0; i < 3; i++) TEST_ASSERT_TRUE(c[i].sOff + c[i].sLen <= 64);
+}
+
 int main(int, char **) {
   UNITY_BEGIN();
   RUN_TEST(test_parse_valid_single_touch);
@@ -203,5 +231,7 @@ int main(int, char **) {
   RUN_TEST(test_modbus_parse_read_rejects);
   RUN_TEST(test_modbus_write_echo_rejects);
   RUN_TEST(test_bluetti_helpers);
+  RUN_TEST(test_sig_splits_plain_when_no_pad);
+  RUN_TEST(test_sig_splits_all_three_when_padded);
   return UNITY_END();
 }

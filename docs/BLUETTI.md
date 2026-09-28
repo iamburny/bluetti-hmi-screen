@@ -394,6 +394,59 @@ Other leads from the same map, not yet checked here:
 - Doesn't fit: its `pack_voltage` at reg 100 would read 9.96 V here, and its
   5 V/12 V/24 V DC rail breakdown (1404-1409) didn't move under USB loads.
 
+## Findings from other forks (2026-09)
+
+A triage of every fork of `Patrick762/bluetti-bt-lib`, `warhammerkid/bluetti_mqtt`
+and `nhurman/bluetti_mqtt` (166 forks, 55 with commits of their own) turned up:
+
+**Signature layout (fixed in firmware).** From `cinderblock/bluetti-bt-lib`
+commit `d397eda`. The device doesn't always send the peer-pubkey signature as a
+plain 32+32 r||s: with a trailing `0x00` pad, r or s is sent as 31 bytes, and
+which one isn't signalled. They measured ~75 % of AP300 handshakes failing
+against a plain-split verifier (and report the official app has the same bug);
+trying all three splits verified five of five captured failures. The firmware
+now does the same (`include/logic/bluetti_sig.h`, used in `onPeerPubkey`), and
+Diagnostics shows `handshakes / failed / alt sig` so we can see whether the
+Elite 300 ever needs it. Alternate splits are only tried when the pad byte is
+present, and each must still verify against K2.
+
+**Reg 156 named by a second source.** `andrewagner86/bluetti_mqtt2`
+"Protocol V2.md" (EP600) names 152 `total_consumption`, 154 `total_feed`, 156
+`total_grid_consumption` and 158 `total_grid_feed`, all ×0.1 -- independent of
+nhurman's map, and agreeing on 152 and 156 (not on 154).
+
+**Settings registers** (`wannessels/bluetti-bt-lib` for the EL30V2/EL100V2,
+`CanberraTinkerer/bluetti_mqtt_ep2000` for the EP2000). Our idle readings match:
+
+| Reg | Meaning | Our idle value |
+|---|---|---|
+| 2005 | working mode: 1 Customised, 2 PV priority, 3 Standard, 4 Time control (EL100V2; the EP2000 map numbers it differently) | read by the firmware; value not yet recorded |
+| 2015 / 2018 | DC / AC ECO auto-off time, 1-4 h | 4 / 4 |
+| 2016 / 2019 | DC / AC ECO power threshold, W (EP2000 map) | 5 / 10 |
+| 2022 / 2023 | system SoC low / high limit, % | 20 / 80 |
+| 2067 | screen timeout 2/3/4/5 = 30 s / 1 min / 5 min / Never | confirms the inferred "3 = 1 min" |
+| 2075 | "SoC set low" (EP2000), paired with 2083 "SoC set high" (our charge limit) | read by the firmware; value not yet recorded |
+
+The firmware reads all of these (2014-2023 as one block, plus 2005 and 2075)
+and shows them on a **read-only** "ECO & Limits" page (ECO button on Bluetti
+Settings). Nothing writes them until one reading on the unit confirms the
+formats -- in particular whether 2075 keeps its percentage in the high byte
+like 2083.
+
+**Leads, unconfirmed:** EP2000 map says 2010 = inverter on/off and 2013 =
+"system power off" (fits 2013's odd behaviour around sleep, below). Encrypted
+units advertise manufacturer ID `0x4C42` with ASCII `BLUETTF` (`BLUETTE` /
+`BLUETTI` for other variants), per nhurman's `is_device_using_encryption` -- a
+more robust way to recognise a Bluetti than the `EL300` name prefix, once
+confirmed on this unit.
+
+**Checked and not needed here:** reassembling notifications split across
+packets (BOPOHOP; our negotiated MTU fits every frame), clearing stale
+unsecure keys on reset and handling an in-band re-key (wannessels; our reset
+already gates on `unsecureSet_`, and a mid-session re-key just causes a
+reconnect), and a fork "EL300" device file (StevePearson) that turned out to be
+a copy of the EL30V2 map.
+
 ## Sleep / standby (2026-06-25)
 
 The app's power button offers **Sleep** or **Full power off**. In **Sleep** the unit
@@ -417,6 +470,60 @@ removed.** Details, so we don't re-try the same dead ends:
 
 Net: the HMI does not detect or control sleep. When the unit is asleep + the link
 drops it simply shows the normal "offline/connecting" state.
+
+### Sleep / wake: new leads (2026-09, untested)
+
+Sources, and how far to trust them:
+- **Bluetti's official Home Assistant integration**,
+  [`bluetti-official/bluetti-home-assistant`](https://github.com/bluetti-official/bluetti-home-assistant)
+  (`custom_components/bluetti/ble/`), which gained a local BLE mode in 2026-08.
+  Public and first-party.
+- [`mikemccllstr/voltkeeper`](https://github.com/mikemccllstr/voltkeeper) register
+  notes, built from the decompiled v3.0.9 app. Not hardware-verified.
+- `tab-liu/ble_gui` (`ref/`), which appears to contain leaked copies of PowerOak's
+  own IoT-module firmware source. Its register numbering matches everything we've
+  verified on the Elite 300, so the register *facts* are recorded here for
+  interoperability. **Don't copy code from it.**
+
+What they say:
+- **2013 is the power control, and its values aren't 0/1:** 1 = full shutdown,
+  2 = toggle sleep/wake (added for the RV line), 3 = power on / wake, 4 = sleep
+  (MCU only). Our earlier wake sweep wrote "various values" to 2013 at slave
+  address 1; whether it tried 2 and 3 isn't recorded.
+- **The official integration talks to the Elite 300 at Modbus slave address
+  0**, not 1: `oak_versatile_v2_device.py` lists `EL300,AORA300` / `AP300` /
+  `AP200` with `slave_addr = 0`. Our firmware reads fine at slave 1, but the
+  leaked firmware treats slave 0 as the IoT board's "summary" address, and the
+  IoT board is what wakes the main board, by pulsing a GPIO. A write to the
+  asleep inverter at slave 1 may simply go nowhere.
+- **The app's sleep sequence** (parent class `oak_versatile_v1_device.py`):
+  write 2073 = 1 ("remote set") if it isn't already, write 2074 = 20 ("remote
+  set SoC") if it's unset or out of range, then write 2013 = 2. The same
+  2013 = 2 wakes it.
+- **2073 is a bitfield, which explains its "sticky 5":** bits 0-1 = remote
+  power-off enabled (the user setting), bits 2-3 = hardware supports it, high
+  byte = auto-sleep days. 4 = supported, not enabled; 5 = supported and enabled.
+  The app's `2073 = 1` step before sleeping is what turns 4 into 5.
+- **Real sleep-status bits:** reg 124 bit 13 (`sleep_on`) and bit 12
+  (`system_off`), and reg 174 bit 3 (`remote_switch`, set from the sleep flag).
+  Also 171 bit 5 (remote power-off supported), 2077 (sleep time remaining) and
+  178-179 (sleep endurance).
+- The unit keeps advertising while asleep. Nothing anywhere suggests a
+  BLE-level or advert-based wake; it's a Modbus write to 2013.
+- Caveat: an open issue on the official integration
+  ([#92](https://github.com/bluetti-official/bluetti-home-assistant/issues/92))
+  says its sleep switch does nothing on an AP300, which is in the same class
+  as the EL300.
+
+Test plan: read 124, 174, 2073 and 2074 at slave 0 and slave 1, awake and then
+asleep (sleep it from the app), to see which bits flip. Then try to wake it
+with FC6 to 2013 = 2, then = 3, at slave 0 first, then slave 1.
+
+Other 100-block identities from the same sources: 100 = total voltage ×0.1 V,
+101 = total current ×0.1 A, 104 = time to full, 105 = time to empty,
+148-149 = `InvAllTotalPower` (signed 32-bit, consistent with our finding),
+176-177 = car-charging energy and 182 = car-charging power (where a linked
+alternator charger would likely show up).
 
 ## Firmware
 

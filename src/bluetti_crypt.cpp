@@ -1,5 +1,6 @@
 #include "bluetti_crypt.h"
 #include "logic/modbus.h"
+#include "logic/bluetti_sig.h"
 #include <esp_random.h>
 #include <string.h>
 #include <mbedtls/aes.h>
@@ -77,6 +78,7 @@ BluettiCrypt::~BluettiCrypt() {
 void BluettiCrypt::reset() {
   unsecureSet_ = false;
   ready_ = false;
+  sigSplit_ = -1;
   mbedtls_mpi_free(&myD_);
   mbedtls_ecp_point_free(&myQ_);
   mbedtls_ecp_point_free(&peerQ_);
@@ -179,9 +181,19 @@ std::vector<uint8_t> BluettiCrypt::onPeerPubkey(const uint8_t* data128) {
   bool ok = false;
   do {
     if (mbedtls_ecp_point_read_binary(&grp_, &K2, k2pt, 65) != 0) break;
-    if (mbedtls_mpi_read_binary(&r, data128 + 64, 32) != 0) break;
-    if (mbedtls_mpi_read_binary(&s, data128 + 96, 32) != 0) break;
-    if (mbedtls_ecdsa_verify(&grp_, hash, 32, &K2, &r, &s) != 0) break;
+    // The signature field's r/s split varies (see logic/bluetti_sig.h); accept
+    // the first candidate that verifies.
+    BluettiSigSplit splits[3];
+    int nSplits = bluetti_sig_splits(data128 + 64, splits);
+    sigSplit_ = -1;  // each key message is verified afresh
+    for (int i = 0; i < nSplits && sigSplit_ < 0; i++) {
+      const BluettiSigSplit &c = splits[i];
+      if (mbedtls_mpi_read_binary(&r, data128 + 64, c.rLen) == 0 &&
+          mbedtls_mpi_read_binary(&s, data128 + 64 + c.sOff, c.sLen) == 0 &&
+          mbedtls_ecdsa_verify(&grp_, hash, 32, &K2, &r, &s) == 0)
+        sigSplit_ = i;
+    }
+    if (sigSplit_ < 0) break;
 
     // 2) load the peer pubkey point for ECDH (04 || X || Y).
     uint8_t peerpt[65];

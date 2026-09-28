@@ -51,6 +51,7 @@ include/logic/   pure, hardware-free logic shared by firmware + tests
   touch_map.h    AXS15231 touch-frame parse + rotation transform
   geom.h         inRect hit-testing
   modbus.h       Modbus RTU framing/CRC + bluetti_clamp_soc
+  bluetti_sig.h  candidate r/s splits of the device's pairing signature
 include/assets/  bluetti_logo.h (bitmap asset; not currently wired into the UI)
 test/test_logic/ Unity host tests for include/logic/
 docs/            BLUETTI.md (protocol reference), CHARGER2.md (future work)
@@ -78,7 +79,8 @@ communicate through small C-style functions and shared structs, not classes.
   button), `POWER_CHART` (power-flow history), `BT_SETTINGS` (a top utility
   row for history + app-release + lifetime energy, always available regardless
   of connection state, then ECO/charge-limit/screen-timeout/BLE-MAC pairing
-  once live data arrives), `ENERGY` (lifetime kWh counters, regs 152-157). The settings gear sits in the gap between the AC IN and AC OUT
+  once live data arrives), `ENERGY` (lifetime kWh counters, regs 152-157), `ECO_LIMITS` (read-only
+  ECO timers/thresholds and SoC limits). The settings gear sits in the gap between the AC IN and AC OUT
   cards on the Power screen; a Bluetooth link icon (flashes while connecting)
   only appears on the "Bluetti offline" state, since that's the only time
   link status is otherwise invisible. `theme.h` = shared palette.
@@ -98,7 +100,8 @@ communicate through small C-style functions and shared structs, not classes.
 - `sdcard.{h,cpp}` — tiny SD_MMC mount singleton for `powerlog`'s CSV.
 - `include/logic/` — pure helpers, the **single source of truth** shared by
   firmware and tests: `touch_map.h` (AXS frame parse + rotation), `geom.h`
-  (hit-testing), `modbus.h` (Modbus RTU framing/CRC).
+  (hit-testing), `modbus.h` (Modbus RTU framing/CRC), `bluetti_sig.h`
+  (pairing-signature splits).
 
 ## Bluetti Elite 300 — native BLE (on-device, no bridge/licence)
 
